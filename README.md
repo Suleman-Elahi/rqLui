@@ -121,15 +121,23 @@ The app uses RQLite's REST API with optimized parameters:
 # Install dependencies
 bun install
 
-# Start development server
+# Start development server (web)
 bun run dev
 
-# Build for production
+# Start development server (Electron desktop app)
+bun run dev:electron
+
+# Build for production (web)
 bun run build
+
+# Build for production (Electron desktop app)
+bun run build:electron
 
 # Lint files
 bun run lint
 ```
+
+> **Note:** This project uses Bun as the package manager. The `packageManager` field in `package.json` enforces this.
 
 ## Project Structure
 

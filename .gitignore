@@ -2,6 +2,11 @@
 .thumbs.db
 node_modules
 
+# Lock files (using bun.lock only)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
 # Kiro specs directory
 .kiro/
 
