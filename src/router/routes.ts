@@ -4,7 +4,13 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('layouts/MainLayout.vue'),
-    children: [{ path: '', component: () => import('pages/IndexPage.vue') }],
+    children: [
+      { path: '', component: () => import('pages/DatabaseListPage.vue') },
+      {
+        path: 'browser/:connectionId',
+        component: () => import('pages/DataBrowserPage.vue'),
+      },
+    ],
   },
 
   // Always leave this as last one,
