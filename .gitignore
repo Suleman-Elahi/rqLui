@@ -5,6 +5,9 @@ node_modules
 # Kiro specs directory
 .kiro/
 
+# VS Code settings
+.vscode/
+
 # Quasar core related directories
 .quasar
 /dist
