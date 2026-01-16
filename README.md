@@ -117,6 +117,12 @@ The app uses RQLite's REST API with optimized parameters:
 
 ## Installation
 
+### Pre-built Desktop Apps
+
+Pre-built desktop applications for **Linux** and **Windows** are available in the [Releases](https://github.com/Suleman-Elahi/rqLui/releases) section.
+
+### Build from Source
+
 ```bash
 # Install dependencies
 bun install
@@ -125,13 +131,14 @@ bun install
 bun run dev
 
 # Start development server (Electron desktop app)
-bun run dev:electron
+quasar dev -m electron
 
 # Build for production (web)
 bun run build
 
 # Build for production (Electron desktop app)
-bun run build:electron
+quasar build -m electron
+# Output will be in dist/electron/
 
 # Lint files
 bun run lint
