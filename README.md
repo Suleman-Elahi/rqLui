@@ -1,6 +1,6 @@
 # rqLui - RQLite Database Browser
 
-<video src="https://youtu.be/cnaHX0fJ-OM" width="100%" controls></video>
+https://youtu.be/cnaHX0fJ-OM
 
 A modern, high-performance web UI for browsing and managing [RQLite](https://rqlite.io/) distributed SQLite databases. Built with Vue 3, Quasar Framework, and TypeScript.
 
