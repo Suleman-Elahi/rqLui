@@ -2,6 +2,9 @@
 .thumbs.db
 node_modules
 
+# Kiro specs directory
+.kiro/
+
 # Quasar core related directories
 .quasar
 /dist

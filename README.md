@@ -130,25 +130,35 @@ bun run lint
 ```
 src/
 ├── components/
-│   ├── DatabaseCard.vue      # Connection card on homepage
 │   ├── AddDatabaseForm.vue   # Dialog for adding connections
-│   ├── TablePanel.vue        # Left sidebar with table list
+│   ├── AddRowDialog.vue      # (Legacy) Row addition dialog
+│   ├── CreateTableDialog.vue # Table creation with builder/SQL modes
+│   ├── DatabaseCard.vue      # Connection card on homepage
+│   ├── DataGrid.vue          # Paginated table with inline edit, import/export menus
+│   ├── QueryTab.vue          # Combines SqlBox + DataGrid + import/export logic
 │   ├── SqlBox.vue            # SQL input with execute button
-│   ├── DataGrid.vue          # Paginated table with inline edit, import/export
-│   ├── QueryTab.vue          # Combines SqlBox + DataGrid + import logic
-│   └── CreateTableDialog.vue # Table creation with builder/SQL modes
+│   └── TablePanel.vue        # Left sidebar with table list
 ├── pages/
 │   ├── DatabaseListPage.vue  # Homepage with connections
-│   └── DataBrowserPage.vue   # Main browser with tabs
+│   ├── DataBrowserPage.vue   # Main browser with tabs
+│   └── ErrorNotFound.vue     # 404 page
 ├── services/
 │   ├── rqlite-service.ts     # RQLite API client with all endpoints
 │   └── storage-service.ts    # localStorage persistence
 ├── stores/
 │   ├── connection-store.ts   # Pinia store for connections
 │   └── tab-store.ts          # Pinia store for tabs
-└── types/
-    ├── database.ts           # Core type definitions
-    └── rqlite.ts             # RQLite API response types
+├── types/
+│   ├── database.ts           # Core type definitions
+│   └── rqlite.ts             # RQLite API response types
+├── router/
+│   ├── index.ts              # Vue Router setup (history mode)
+│   └── routes.ts             # Route definitions
+├── layouts/
+│   └── MainLayout.vue        # App shell with header
+├── boot/
+│   └── pinia.ts              # Pinia initialization
+└── App.vue                   # Root component
 ```
 
 ## Technical Details
