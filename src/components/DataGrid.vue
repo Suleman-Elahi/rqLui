@@ -12,7 +12,7 @@
     class="data-grid"
     @request="onRequest"
   >
-    <template #top-right>
+    <template #top-left>
       <q-btn 
         v-if="!isAddingRow" 
         flat 
@@ -69,6 +69,12 @@
                 <q-icon name="code" />
               </q-item-section>
               <q-item-section>Export SQL</q-item-section>
+            </q-item>
+            <q-item clickable v-close-popup @click="$emit('export-ddl')">
+              <q-item-section avatar>
+                <q-icon name="schema" />
+              </q-item-section>
+              <q-item-section>Export DDL</q-item-section>
             </q-item>
           </q-list>
         </q-menu>
@@ -173,6 +179,7 @@ const emit = defineEmits<{
   (e: 'import-sql'): void;
   (e: 'export-csv'): void;
   (e: 'export-sql'): void;
+  (e: 'export-ddl'): void;
   (e: 'truncate-table'): void;
   (e: 'delete-table'): void;
 }>();

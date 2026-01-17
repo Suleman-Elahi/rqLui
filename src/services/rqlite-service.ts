@@ -57,9 +57,12 @@ export class RqliteService {
   /**
    * Raw SQL Console - Auto-detects read vs write
    * Endpoint: POST /db/request?associative&db_timeout=5s
+   * @param sql - SQL query to execute
+   * @param level - Read consistency level (none, weak, linearizable, strong)
    */
   async request(
-    sql: string
+    sql: string,
+    level: 'none' | 'weak' | 'linearizable' | 'strong' = 'none'
   ): Promise<RqliteAssociativeResult | RqliteExecuteResult> {
     const response = await this.client.post<RqliteAssociativeResponse>(
       '/db/request',
@@ -68,6 +71,7 @@ export class RqliteService {
         params: {
           associative: '',
           db_timeout: '5s',
+          level,
         },
       }
     );
@@ -172,6 +176,38 @@ export class RqliteService {
     const schema = await this.getTableSchema(table);
     const pkColumn = schema.find((col) => col.primaryKey);
     return pkColumn?.name || null;
+  }
+
+  /**
+   * Get CREATE TABLE DDL statement for a table
+   * Uses sqlite_master to get the original DDL
+   */
+  async getTableDDL(table: string): Promise<string> {
+    const result = await this.query(
+      `SELECT sql FROM sqlite_master WHERE type='table' AND name="${table}"`
+    );
+    const firstRow = result.rows?.[0];
+    if (firstRow && firstRow.sql) {
+      return firstRow.sql as string;
+    }
+    // Fallback: generate DDL from schema if not found
+    return this.generateTableDDL(table);
+  }
+
+  /**
+   * Generate CREATE TABLE DDL from schema info
+   * Used as fallback if sqlite_master doesn't have the DDL
+   */
+  private async generateTableDDL(table: string): Promise<string> {
+    const schema = await this.getTableSchema(table);
+    const columnDefs = schema.map((col) => {
+      let def = `"${col.name}" ${col.type || 'TEXT'}`;
+      if (col.primaryKey) {
+        def += ' PRIMARY KEY';
+      }
+      return def;
+    });
+    return `CREATE TABLE "${table}" (\n  ${columnDefs.join(',\n  ')}\n);`;
   }
 
   /**
