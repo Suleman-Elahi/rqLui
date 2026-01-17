@@ -48,6 +48,24 @@
         </q-tab-panel>
 
         <q-tab-panel name="sql" class="q-pa-md">
+          <div class="row q-mb-md items-center">
+            <div class="text-subtitle2">Import from .sql file</div>
+            <q-space />
+            <q-btn
+              flat
+              color="primary"
+              icon="upload_file"
+              label="Upload SQL File"
+              @click="triggerFileUpload"
+            />
+            <input
+              ref="fileInput"
+              type="file"
+              accept=".sql"
+              style="display: none"
+              @change="handleFileUpload"
+            />
+          </div>
           <q-input
             v-model="rawSql"
             type="textarea"
@@ -85,6 +103,7 @@ const tableName = ref('');
 const rawSql = ref('');
 const loading = ref(false);
 const error = ref<string | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
 
 interface ColumnDef {
   name: string;
@@ -135,10 +154,39 @@ watch(() => props.modelValue, (isOpen) => {
   if (isOpen) resetForm();
 });
 
+function triggerFileUpload() {
+  fileInput.value?.click();
+}
+
+function handleFileUpload(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const content = e.target?.result as string;
+    rawSql.value = content;
+  };
+  reader.readAsText(file);
+  
+  // Reset input so the same file can be uploaded again
+  target.value = '';
+}
+
 function handleCreate() {
   const sql = activeTab.value === 'builder' ? generatedSql.value : rawSql.value;
   
-  if (!sql || sql.startsWith('--')) {
+  // Remove both single-line (--) and multi-line (/* */) comments
+  const sqlWithoutComments = sql
+    .replace(/\/\*[\s\S]*?\*\//g, '') // Remove /* */ comments
+    .split('\n')
+    .filter(line => !line.trim().startsWith('--')) // Remove -- comments
+    .join('\n')
+    .trim();
+  
+  if (!sqlWithoutComments) {
     error.value = 'Please provide valid SQL';
     return;
   }
@@ -147,7 +195,9 @@ function handleCreate() {
   emit('update:modelValue', false);
 }
 
-defineExpose({ getSql: () => activeTab.value === 'builder' ? generatedSql.value : rawSql.value });
+defineExpose({ 
+  getSql: () => activeTab.value === 'builder' ? generatedSql.value : rawSql.value 
+});
 </script>
 
 <style scoped>

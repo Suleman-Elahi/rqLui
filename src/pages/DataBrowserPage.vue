@@ -178,7 +178,16 @@ async function handleCreateTable() {
   if (!rqliteService || !createDialogRef.value) return;
 
   const sql = createDialogRef.value.getSql();
-  if (!sql || sql.startsWith('--')) return;
+  
+  // Remove both single-line (--) and multi-line (/* */) comments
+  const sqlWithoutComments = sql
+    .replace(/\/\*[\s\S]*?\*\//g, '') // Remove /* */ comments
+    .split('\n')
+    .filter(line => !line.trim().startsWith('--')) // Remove -- comments
+    .join('\n')
+    .trim();
+  
+  if (!sqlWithoutComments) return;
 
   try {
     await rqliteService.execute([sql]);

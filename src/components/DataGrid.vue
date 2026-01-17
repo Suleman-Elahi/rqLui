@@ -3,7 +3,8 @@
     :rows="allRows"
     :columns="tableColumns"
     :loading="loading"
-    :pagination="tablePagination"
+    v-model:pagination="tablePagination"
+    :rows-per-page-options="[100, 250, 500, 1000]"
     row-key="__rowIndex"
     flat
     bordered
@@ -105,7 +106,24 @@
     <template #body="props">
       <q-tr :props="props" :class="{ 'bg-blue-1': props.row.__isNew }">
         <q-td v-for="col in props.cols" :key="col.name" :props="props">
-          <template v-if="props.row.__isNew">
+          <!-- Actions column with delete button -->
+          <template v-if="col.name === '__actions' && !props.row.__isNew">
+            <q-btn
+              flat
+              dense
+              round
+              size="sm"
+              icon="delete"
+              color="negative"
+              @click="handleDeleteRow(props.row)"
+              class="delete-btn"
+            >
+              <q-tooltip>Delete row</q-tooltip>
+            </q-btn>
+          </template>
+          
+          <!-- New row input -->
+          <template v-else-if="props.row.__isNew && col.name !== '__actions'">
             <q-input
               v-model="newRowData[col.field]"
               dense
@@ -114,7 +132,9 @@
               class="new-row-input"
             />
           </template>
-          <template v-else>
+          
+          <!-- Regular data cell -->
+          <template v-else-if="col.name !== '__actions'">
             <span class="cell-content">{{ formatValue(col.value) }}</span>
             <q-popup-edit
               v-if="primaryKey"
@@ -135,6 +155,8 @@
             </q-popup-edit>
           </template>
         </q-td>
+        
+        <!-- Save/Cancel buttons for new row -->
         <q-td v-if="props.row.__isNew" auto-width>
           <q-btn flat dense color="positive" icon="check" @click="saveNewRow" />
           <q-btn flat dense color="negative" icon="close" @click="cancelAddRow" />
@@ -159,7 +181,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue';
+import { ref, computed, reactive, watch } from 'vue';
 import type { QTableColumn } from 'quasar';
 import type { ColumnDef, PaginationState, CellEditPayload } from '../types/database';
 
@@ -175,6 +197,7 @@ const emit = defineEmits<{
   (e: 'update:pagination', value: PaginationState): void;
   (e: 'cell-edit', payload: CellEditPayload): void;
   (e: 'insert-row', data: Record<string, string>): void;
+  (e: 'delete-row', row: Record<string, unknown>): void;
   (e: 'import-csv'): void;
   (e: 'import-sql'): void;
   (e: 'export-csv'): void;
@@ -187,22 +210,49 @@ const emit = defineEmits<{
 const isAddingRow = ref(false);
 const newRowData = reactive<Record<string, string>>({});
 
-const tableColumns = computed<QTableColumn[]>(() =>
-  props.columns.map((col) => ({
+const tableColumns = computed<QTableColumn[]>(() => {
+  const cols: QTableColumn[] = [];
+  
+  // Add delete action column as first column
+  if (props.primaryKey) {
+    cols.push({
+      name: '__actions',
+      label: '',
+      field: '__actions',
+      align: 'center',
+      sortable: false,
+      headerClasses: 'text-bold',
+      style: 'width: 50px',
+    });
+  }
+  
+  // Add data columns
+  cols.push(...props.columns.map((col) => ({
     name: col.name,
-    label: col.name, // Use original column name (preserves case)
+    label: col.name,
     field: col.field,
     sortable: col.sortable,
     align: col.align,
     headerClasses: 'text-bold',
-  }))
-);
+  })));
+  
+  return cols;
+});
 
-const tablePagination = computed(() => ({
-  page: props.pagination.page,
-  rowsPerPage: props.pagination.rowsPerPage,
-  rowsNumber: props.pagination.rowsNumber,
-}));
+const tablePagination = ref({
+  page: 1,
+  rowsPerPage: 100,
+  rowsNumber: 0,
+});
+
+// Watch for prop changes and update local pagination
+watch(() => props.pagination, (newPagination) => {
+  tablePagination.value = {
+    page: newPagination.page,
+    rowsPerPage: newPagination.rowsPerPage,
+    rowsNumber: newPagination.rowsNumber,
+  };
+}, { immediate: true, deep: true });
 
 const allRows = computed(() => {
   if (isAddingRow.value) {
@@ -266,6 +316,10 @@ function handleCellEdit(
     primaryKeyValue: row[props.primaryKey],
   });
 }
+
+function handleDeleteRow(row: Record<string, unknown>) {
+  emit('delete-row', row);
+}
 </script>
 
 <style scoped>
@@ -281,5 +335,12 @@ function handleCellEdit(
 }
 .new-row-input {
   min-width: 80px;
+}
+.delete-btn {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.q-tr:hover .delete-btn {
+  opacity: 1;
 }
 </style>

@@ -1,8 +1,9 @@
 import axios, { type AxiosInstance } from 'axios';
 import type { ColumnDef } from '../types/database';
 import {
-  type RqliteAssociativeResponse,
   type RqliteAssociativeResult,
+  type RqliteArrayResponse,
+  type RqliteArrayResult,
   type RqliteExecuteResponse,
   type RqliteExecuteResult,
   type ParameterizedStatement,
@@ -31,28 +32,121 @@ export class RqliteService {
   }
 
   /**
-   * Data Grid Browsing - Fast reads with associative format
-   * Endpoint: GET /db/query?associative&level=none
+   * Convert array format to associative format while preserving column order
    */
-  async query(sql: string): Promise<RqliteAssociativeResult> {
-    const response = await this.client.get<RqliteAssociativeResponse>(
+  private arrayToAssociative(arrayResult: RqliteArrayResult): RqliteAssociativeResult {
+    const { columns, types, values, time, error, rows_affected, last_insert_id } = arrayResult;
+    
+    if (!values || !columns) {
+      return { 
+        ...(columns && { columns }),
+        ...(types && { types }),
+        rows: [],
+        ...(time !== undefined && { time }),
+        ...(error && { error }),
+        ...(rows_affected !== undefined && { rows_affected }),
+        ...(last_insert_id !== undefined && { last_insert_id })
+      };
+    }
+
+    // Convert array rows to objects using column order
+    const rows = values.map(valueArray => {
+      const row: Record<string, unknown> = {};
+      columns.forEach((col, index) => {
+        row[col] = valueArray[index];
+      });
+      return row;
+    });
+
+    return { 
+      columns,
+      ...(types && { types }),
+      rows,
+      ...(time !== undefined && { time }),
+      ...(error && { error }),
+      ...(rows_affected !== undefined && { rows_affected }),
+      ...(last_insert_id !== undefined && { last_insert_id })
+    };
+  }
+
+  /**
+   * Data Grid Browsing - Fast reads with array format (preserves column order)
+   * Endpoint: GET /db/query?level=none&timings
+   */
+  async queryWithTime(sql: string): Promise<{ result: RqliteAssociativeResult; time?: number }> {
+    const response = await this.client.get<RqliteArrayResponse>(
       '/db/query',
       {
         params: {
           q: sql,
-          associative: '',
+          timings: '',
           level: 'none',
         },
       }
     );
 
-    const result = response.data.results[0];
-    if (result) {
-      this.checkResponseError(result);
+    const arrayResult = response.data.results[0];
+    if (arrayResult) {
+      this.checkResponseError(arrayResult);
     }
-    return result || { rows: [] };
+    
+    const result = arrayResult 
+      ? this.arrayToAssociative(arrayResult)
+      : { rows: [] };
+    
+    return { 
+      result,
+      ...(result.time !== undefined && { time: result.time })
+    };
   }
 
+  /**
+   * Data Grid Browsing - Fast reads with associative format
+   * Endpoint: GET /db/query?associative&level=none
+   */
+  async query(sql: string): Promise<RqliteAssociativeResult> {
+    const { result } = await this.queryWithTime(sql);
+    return result;
+  }
+
+
+  /**
+   * Raw SQL Console - Auto-detects read vs write (with timing)
+   * Endpoint: POST /db/request?db_timeout=5s&timings
+   * @param sql - SQL query to execute
+   * @param level - Read consistency level (none, weak, linearizable, strong)
+   */
+  async requestWithTime(
+    sql: string,
+    level: 'none' | 'weak' | 'linearizable' | 'strong' = 'none'
+  ): Promise<{ result: RqliteAssociativeResult | RqliteExecuteResult; time?: number }> {
+    const response = await this.client.post<RqliteArrayResponse>(
+      '/db/request',
+      [sql],
+      {
+        params: {
+          db_timeout: '5s',
+          timings: '',
+          level,
+        },
+      }
+    );
+
+    const arrayResult = response.data.results[0];
+    if (arrayResult) {
+      this.checkResponseError(arrayResult);
+    }
+    
+    // Check if it's a SELECT query (has values) or write operation (has rows_affected)
+    const result = arrayResult && 'values' in arrayResult
+      ? this.arrayToAssociative(arrayResult)
+      : (arrayResult || {});
+    
+    return { 
+      result,
+      ...(result.time !== undefined && { time: result.time })
+    };
+  }
 
   /**
    * Raw SQL Console - Auto-detects read vs write
@@ -64,23 +158,8 @@ export class RqliteService {
     sql: string,
     level: 'none' | 'weak' | 'linearizable' | 'strong' = 'none'
   ): Promise<RqliteAssociativeResult | RqliteExecuteResult> {
-    const response = await this.client.post<RqliteAssociativeResponse>(
-      '/db/request',
-      [sql],
-      {
-        params: {
-          associative: '',
-          db_timeout: '5s',
-          level,
-        },
-      }
-    );
-
-    const result = response.data.results[0];
-    if (result) {
-      this.checkResponseError(result);
-    }
-    return result || { rows: [] };
+    const { result } = await this.requestWithTime(sql, level);
+    return result;
   }
 
   /**
@@ -214,24 +293,41 @@ export class RqliteService {
    * Get total row count for a table
    */
   async getTableCount(table: string): Promise<number> {
-    const result = await this.query(`SELECT COUNT(*) as count FROM "${table}"`);
+    const result = await this.query(`SELECT COUNT(*) FROM "${table}"`);
     const row = result.rows?.[0];
-    return (row?.count as number) || 0;
+    
+    if (row) {
+      // The first (and only) value in the row is the count
+      const firstValue = Object.values(row)[0];
+      if (typeof firstValue === 'number') return firstValue;
+      // Try parsing as number if it's a string
+      if (typeof firstValue === 'string') {
+        const parsed = parseInt(firstValue, 10);
+        if (!isNaN(parsed)) return parsed;
+      }
+    }
+    
+    return 0;
   }
 
   /**
-   * Query with pagination using LIMIT/OFFSET
+   * Query with pagination using LIMIT/OFFSET (with timing)
    */
   async queryWithPagination(
     table: string,
     page: number,
     pageSize: number
-  ): Promise<{ result: RqliteAssociativeResult; total: number }> {
+  ): Promise<{ result: RqliteAssociativeResult; total: number; time?: number }> {
     const offset = (page - 1) * pageSize;
-    const [result, total] = await Promise.all([
-      this.query(`SELECT * FROM "${table}" LIMIT ${pageSize} OFFSET ${offset}`),
+    const [queryResult, total] = await Promise.all([
+      this.queryWithTime(`SELECT * FROM "${table}" LIMIT ${pageSize} OFFSET ${offset}`),
       this.getTableCount(table),
     ]);
-    return { result, total };
+    
+    return { 
+      result: queryResult.result, 
+      total,
+      ...(queryResult.time !== undefined && { time: queryResult.time })
+    };
   }
 }

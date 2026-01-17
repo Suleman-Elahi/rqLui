@@ -12,6 +12,10 @@
       {{ error }}
     </div>
 
+    <div v-if="queryTime !== null" class="q-pa-xs q-px-sm text-caption text-grey-7 bg-grey-2">
+      Query time: {{ (queryTime * 1000).toFixed(2) }}ms
+    </div>
+
     <div class="col relative-position">
       <DataGrid
         :columns="columns"
@@ -22,6 +26,7 @@
         @update:pagination="handlePaginationChange"
         @cell-edit="handleCellEdit"
         @insert-row="handleInsertRow"
+        @delete-row="handleDeleteRow"
         @import-csv="handleImportCsv"
         @import-sql="handleImportSql"
         @export-csv="handleExportCsv"
@@ -61,11 +66,12 @@ const columns = ref<ColumnDef[]>([]);
 const rows = ref<Record<string, unknown>[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
+const queryTime = ref<number | null>(null);
 const primaryKey = ref<string | null>(null);
 const consistency = ref<ConsistencyLevel>('none');
 const pagination = ref<PaginationState>({
   page: 1,
-  rowsPerPage: 25,
+  rowsPerPage: 100,
   rowsNumber: 0,
 });
 
@@ -107,20 +113,23 @@ async function loadTableSchema() {
 async function loadData() {
   loading.value = true;
   error.value = null;
+  queryTime.value = null;
 
   try {
-    const { result, total } = await rqliteService.queryWithPagination(
+    const { result, total, time } = await rqliteService.queryWithPagination(
       props.tableName,
       pagination.value.page,
       pagination.value.rowsPerPage
     );
+
+    queryTime.value = time ?? null;
 
     rows.value = (result.rows || []).map((row, index) => ({
       ...row,
       __rowIndex: index,
     }));
     
-    // Update columns from query result or derive from first row
+    // IMPORTANT: Use columns from API response to preserve order
     if (result.columns && result.columns.length > 0) {
       columns.value = result.columns.map((col) => ({
         name: col,
@@ -130,6 +139,7 @@ async function loadData() {
         align: 'left' as const,
       }));
     } else if (result.rows && result.rows.length > 0) {
+      // Fallback: derive from first row (but this may not preserve order)
       const firstRow = result.rows[0];
       if (firstRow) {
         const colNames = Object.keys(firstRow).filter(k => !k.startsWith('__'));
@@ -143,7 +153,11 @@ async function loadData() {
       }
     }
     
-    pagination.value.rowsNumber = total;
+    // Update pagination - create new object to ensure reactivity
+    pagination.value = {
+      ...pagination.value,
+      rowsNumber: total
+    };
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Query failed';
     rows.value = [];
@@ -155,18 +169,21 @@ async function loadData() {
 async function executeQuery() {
   loading.value = true;
   error.value = null;
+  queryTime.value = null;
 
   try {
-    const result = await rqliteService.request(sql.value, consistency.value);
+    const { result, time } = await rqliteService.requestWithTime(sql.value, consistency.value);
+
+    queryTime.value = time ?? null;
 
     if ('rows' in result && result.rows) {
-      // SELECT query - derive columns from the first row if columns array not provided
+      // SELECT query
       rows.value = result.rows.map((row, index) => ({
         ...row,
         __rowIndex: index,
       }));
       
-      // Use columns from response, or derive from first row keys
+      // IMPORTANT: Use columns from API response to preserve order
       if (result.columns && result.columns.length > 0) {
         columns.value = result.columns.map((col) => ({
           name: col,
@@ -176,7 +193,7 @@ async function executeQuery() {
           align: 'left' as const,
         }));
       } else if (result.rows.length > 0) {
-        // Derive columns from first row keys (excluding internal __rowIndex)
+        // Fallback: derive from first row (but this may not preserve order)
         const firstRow = result.rows[0];
         if (firstRow) {
           const colNames = Object.keys(firstRow).filter(k => !k.startsWith('__'));
@@ -260,6 +277,41 @@ async function handleInsertRow(data: Record<string, string>) {
       message: err instanceof Error ? err.message : 'Insert failed',
     });
   }
+}
+
+function handleDeleteRow(row: Record<string, unknown>) {
+  if (!primaryKey.value) {
+    $q.notify({ type: 'negative', message: 'Cannot delete: no primary key' });
+    return;
+  }
+
+  const pkValue = row[primaryKey.value];
+  
+  $q.dialog({
+    title: 'Delete Row',
+    message: `Are you sure you want to delete this row? This action cannot be undone.`,
+    cancel: true,
+    persistent: true,
+    color: 'negative',
+  }).onOk(() => {
+    void (async () => {
+      try {
+        const statement: ParameterizedStatement = [
+          `DELETE FROM "${props.tableName}" WHERE "${primaryKey.value}" = ?`,
+          pkValue,
+        ];
+
+        await rqliteService.execute(statement);
+        $q.notify({ type: 'positive', message: 'Row deleted' });
+        await loadData();
+      } catch (err) {
+        $q.notify({
+          type: 'negative',
+          message: err instanceof Error ? err.message : 'Delete failed',
+        });
+      }
+    })();
+  });
 }
 
 async function handleExportCsv() {

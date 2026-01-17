@@ -198,11 +198,20 @@ async function parseSQL(file: File, batchSize: number) {
       const statement = statementBuffer.substring(0, semicolonIndex).trim();
       statementBuffer = statementBuffer.substring(semicolonIndex + 1);
 
-      if (!statement || statement.startsWith('--')) continue;
+      if (!statement) continue;
+
+      // Remove comments from the statement
+      const cleanedStatement = statement
+        .split('\n')
+        .filter(line => !line.trim().startsWith('--'))
+        .join('\n')
+        .trim();
+
+      if (!cleanedStatement) continue;
 
       // Only process INSERT statements
-      if (statement.toUpperCase().startsWith('INSERT')) {
-        currentBatch.push([statement]);
+      if (cleanedStatement.toUpperCase().startsWith('INSERT')) {
+        currentBatch.push([cleanedStatement]);
         totalRows++;
 
         if (currentBatch.length >= batchSize) {
@@ -230,8 +239,14 @@ async function parseSQL(file: File, batchSize: number) {
   // Process remaining buffer
   if (!cancelled && statementBuffer.trim()) {
     const statement = statementBuffer.trim();
-    if (statement.toUpperCase().startsWith('INSERT')) {
-      currentBatch.push([statement]);
+    const cleanedStatement = statement
+      .split('\n')
+      .filter(line => !line.trim().startsWith('--'))
+      .join('\n')
+      .trim();
+      
+    if (cleanedStatement && cleanedStatement.toUpperCase().startsWith('INSERT')) {
+      currentBatch.push([cleanedStatement]);
       totalRows++;
     }
   }

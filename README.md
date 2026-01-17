@@ -15,13 +15,21 @@ A modern, high-performance web UI for browsing and managing [RQLite](https://rql
 - **Tabbed Data Browser** - Open multiple tables simultaneously in separate tabs for easy comparison and navigation
 - **SQL Console** - Execute raw SQL queries with Ctrl+Enter shortcut
 - **Inline Cell Editing** - Click any cell to edit values directly in the data grid using Quasar's popup edit
-- **Pagination** - Efficiently browse large tables with server-side pagination using LIMIT/OFFSET
+- **Row Deletion** - Delete individual rows with hover-activated delete button (requires primary key)
+- **Pagination** - Efficiently browse large tables with server-side pagination (100, 250, 500, 1000 rows per page)
+- **Column Order Preservation** - Displays columns in the exact order returned by the database (not alphabetically sorted)
+- **Query Timing** - Shows execution time for all queries in milliseconds
 - **Connection Persistence** - Database connections are saved to localStorage and restored on app reload
 
 ### Table Management
 - **Create Table** - Visual table builder with column definitions (name, type, primary key, nullable) or raw SQL mode
+  - **DDL Import** - Upload .sql files with CREATE TABLE statements directly in the SQL tab
+  - **Comment Support** - Handles both single-line (`--`) and multi-line (`/* */`) SQL comments
 - **Truncate Table** - Delete all rows from a table with confirmation dialog
 - **Delete Table** - Drop table entirely with confirmation dialog
+- **Test Data Generator** - Included script (`testdata/generate-test-data.js`) to generate SQL INSERT statements from DDL files
+  - Usage: `bun testdata/generate-test-data.js <ddl-file> <num-rows> [output-file]`
+  - Generates appropriate test data based on column types (INTEGER, TEXT, REAL, BLOB)
 
 ### Large-Scale Data Import (1M+ rows supported)
 - **Web Worker-Based Processing** - All parsing runs in a separate thread to keep UI responsive
@@ -36,6 +44,7 @@ A modern, high-performance web UI for browsing and managing [RQLite](https://rql
   - Stream-based parsing for large SQL dumps
   - Batches of 500 INSERT statements per request
   - Filters and executes only INSERT statements (ignores comments, DDL)
+  - **Improved Comment Handling** - Properly strips both single-line and multi-line comments before processing
   - Progress tracking with statement count
   - **Cancel support** - Abort long-running imports at any time
 

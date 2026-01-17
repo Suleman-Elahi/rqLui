@@ -11,6 +11,23 @@ export interface RqliteAssociativeResult {
   error?: string;
   rows_affected?: number;
   last_insert_id?: number;
+  time?: number; // query execution time in seconds
+}
+
+// Response when using array format (preserves column order)
+export interface RqliteArrayResponse {
+  results: RqliteArrayResult[];
+  time?: number;
+}
+
+export interface RqliteArrayResult {
+  columns?: string[];
+  types?: string[];
+  values?: unknown[][]; // array format returns rows as arrays
+  error?: string;
+  rows_affected?: number;
+  last_insert_id?: number;
+  time?: number; // query execution time in seconds
 }
 
 // Response for execute operations
