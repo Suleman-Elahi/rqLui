@@ -13,11 +13,17 @@ import {
 export class RqliteService {
   private client: AxiosInstance;
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, auth?: { username: string; password: string }) {
     this.client = axios.create({
       baseURL: baseUrl.replace(/\/$/, ''), // Remove trailing slash
       timeout: 30000,
       headers: { 'Content-Type': 'application/json' },
+      ...(auth && {
+        auth: {
+          username: auth.username,
+          password: auth.password,
+        },
+      }),
     });
   }
 

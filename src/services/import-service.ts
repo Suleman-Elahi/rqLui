@@ -20,6 +20,8 @@ export interface ImportOptions {
   file: File;
   tableName: string;
   connectionUrl: string;
+  username?: string;
+  password?: string;
   batchSize?: number;
   onProgress?: (progress: ImportProgress) => void;
 }
@@ -47,10 +49,13 @@ export class ImportService {
     type: 'parse-csv' | 'parse-sql',
     options: ImportOptions
   ): Promise<ImportProgress> {
-    const { file, tableName, connectionUrl, batchSize = 1000, onProgress } = options;
+    const { file, tableName, connectionUrl, username, password, batchSize = 1000, onProgress } = options;
     
     this.cancelled = false;
-    const rqlite = new RqliteService(connectionUrl);
+    const rqlite = new RqliteService(
+      connectionUrl,
+      username && password ? { username, password } : undefined
+    );
     
     let headers: string[] = [];
     let rowsParsed = 0;

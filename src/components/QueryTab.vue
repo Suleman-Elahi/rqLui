@@ -53,6 +53,8 @@ import type { ParameterizedStatement } from '../types/rqlite';
 const props = defineProps<{
   connectionUrl: string;
   tableName: string;
+  username?: string;
+  password?: string;
 }>();
 
 const emit = defineEmits<{
@@ -76,11 +78,16 @@ const pagination = ref<PaginationState>({
 });
 
 let rqliteService: RqliteService;
-let importService: ImportService | null = null;
+let importService: ImportService | null = null; // eslint-disable-line @typescript-eslint/no-redundant-type-constituents
 let exportService: ExportService | null = null;
 
 onMounted(async () => {
-  rqliteService = new RqliteService(props.connectionUrl);
+  rqliteService = new RqliteService(
+    props.connectionUrl,
+    props.username && props.password
+      ? { username: props.username, password: props.password }
+      : undefined
+  );
   await loadTableSchema();
   await loadData();
 });
@@ -172,7 +179,24 @@ async function executeQuery() {
   queryTime.value = null;
 
   try {
-    const { result, time } = await rqliteService.requestWithTime(sql.value, consistency.value);
+    let queryToExecute = sql.value.trim();
+    
+    // Check if it's a SELECT query without LIMIT
+    const isSelect = /^\s*SELECT/i.test(queryToExecute);
+    const hasLimit = /\bLIMIT\b/i.test(queryToExecute);
+    
+    if (isSelect && !hasLimit) {
+      // Add LIMIT to prevent fetching too many rows
+      queryToExecute = `${queryToExecute} LIMIT ${pagination.value.rowsPerPage}`;
+      
+      $q.notify({
+        type: 'info',
+        message: `Added LIMIT ${pagination.value.rowsPerPage} to prevent loading too many rows`,
+        timeout: 3000,
+      });
+    }
+
+    const { result, time } = await rqliteService.requestWithTime(queryToExecute, consistency.value);
 
     queryTime.value = time ?? null;
 
@@ -206,7 +230,13 @@ async function executeQuery() {
           }));
         }
       }
-      pagination.value.rowsNumber = rows.value.length;
+      
+      // For custom queries, we don't know the total count
+      // Set rowsNumber to the fetched count
+      pagination.value = {
+        ...pagination.value,
+        rowsNumber: rows.value.length
+      };
     } else {
       // INSERT/UPDATE/DELETE
       $q.notify({
@@ -396,6 +426,7 @@ async function runWorkerExport(format: 'csv' | 'sql') {
     const blob = await exportService.export({
       tableName: props.tableName,
       connectionUrl: props.connectionUrl,
+      ...(props.username && props.password && { username: props.username, password: props.password }),
       format,
       pageSize: 5000,
       concurrency: 3,
@@ -503,6 +534,7 @@ async function runWorkerImport(file: File, type: 'csv' | 'sql') {
           file,
           tableName: props.tableName,
           connectionUrl: props.connectionUrl,
+          ...(props.username && props.password && { username: props.username, password: props.password }),
           batchSize: 1000,
           onProgress,
         })
@@ -510,6 +542,7 @@ async function runWorkerImport(file: File, type: 'csv' | 'sql') {
           file,
           tableName: props.tableName,
           connectionUrl: props.connectionUrl,
+          ...(props.username && props.password && { username: props.username, password: props.password }),
           batchSize: 500,
           onProgress,
         })

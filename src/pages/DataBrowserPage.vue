@@ -4,9 +4,10 @@
       v-model="drawerOpen"
       side="left"
       bordered
-      :width="220"
+      :width="drawerWidth"
       :breakpoint="500"
       class="bg-grey-1"
+      show-if-above
     >
       <TablePanel
         :tables="tables"
@@ -15,6 +16,12 @@
         @create="showCreateDialog = true"
         @refresh="loadTables"
       />
+      
+      <!-- Resize handle -->
+      <div 
+        class="drawer-resize-handle"
+        @mousedown="startDrawerResize"
+      ></div>
     </q-drawer>
 
     <q-page-container>
@@ -31,10 +38,10 @@
 
         <template v-else>
           <div class="row items-center q-pa-xs bg-grey-2 header-bar">
-            <q-btn flat dense icon="menu" @click="drawerOpen = !drawerOpen" />
+            <q-btn flat dense icon="menu" @click="drawerOpen = !drawerOpen" size="sm" />
             <div class="text-subtitle2 q-ml-sm">{{ connection?.name }}</div>
             <q-space />
-            <q-btn flat dense icon="home" @click="router.push('/')">
+            <q-btn flat dense icon="home" @click="router.push('/')" size="sm">
               <q-tooltip>Back to connections</q-tooltip>
             </q-btn>
           </div>
@@ -79,6 +86,7 @@
                 v-if="connection"
                 :connection-url="connection.url"
                 :table-name="tab.tableName"
+                v-bind="connection.username && connection.password ? { username: connection.username, password: connection.password } : {}"
                 @table-deleted="handleTableDeleted(tab.id)"
               />
             </q-tab-panel>
@@ -103,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useQuasar } from 'quasar';
 import { useConnectionStore } from '../stores/connection-store';
@@ -128,6 +136,8 @@ const tables = ref<string[]>([]);
 const drawerOpen = ref(true);
 const showCreateDialog = ref(false);
 const createDialogRef = ref<InstanceType<typeof CreateTableDialog> | null>(null);
+const drawerWidth = ref(220);
+const isResizingDrawer = ref(false);
 
 const tabs = computed(() => tabStore.getTabs(connectionId.value));
 const activeTabId = computed({
@@ -149,8 +159,23 @@ onMounted(async () => {
     return;
   }
 
-  rqliteService = new RqliteService(connection.value.url);
+  rqliteService = new RqliteService(
+    connection.value.url,
+    connection.value.username && connection.value.password
+      ? { username: connection.value.username, password: connection.value.password }
+      : undefined
+  );
   await loadTables();
+  
+  // Add global mouse event listeners for resize
+  document.addEventListener('mousemove', onDrawerMouseMove);
+  document.addEventListener('mouseup', onDrawerMouseUp);
+});
+
+onUnmounted(() => {
+  // Clean up event listeners
+  document.removeEventListener('mousemove', onDrawerMouseMove);
+  document.removeEventListener('mouseup', onDrawerMouseUp);
 });
 
 async function loadTables() {
@@ -205,6 +230,24 @@ async function handleTableDeleted(tabId: string) {
   tabStore.closeTab(connectionId.value, tabId);
   await loadTables();
 }
+
+function startDrawerResize(e: MouseEvent) {
+  isResizingDrawer.value = true;
+  e.preventDefault();
+}
+
+function onDrawerMouseMove(e: MouseEvent) {
+  if (!isResizingDrawer.value) return;
+  
+  const newWidth = e.clientX;
+  if (newWidth >= 150 && newWidth <= 500) {
+    drawerWidth.value = newWidth;
+  }
+}
+
+function onDrawerMouseUp() {
+  isResizingDrawer.value = false;
+}
 </script>
 
 <style scoped>
@@ -213,6 +256,8 @@ async function handleTableDeleted(tabId: string) {
 }
 .header-bar {
   border-bottom: 1px solid #ddd;
+  min-height: 40px;
+  height: 40px;
 }
 .tab-panels {
   overflow: hidden;
@@ -220,5 +265,19 @@ async function handleTableDeleted(tabId: string) {
 .tab-panels :deep(.q-tab-panel) {
   height: 100%;
   padding: 0;
+}
+.drawer-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 1000;
+  user-select: none;
+}
+.drawer-resize-handle:hover {
+  background: rgba(25, 118, 210, 0.3);
 }
 </style>

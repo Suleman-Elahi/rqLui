@@ -28,6 +28,39 @@
             dense
           />
 
+          <q-checkbox
+            v-model="form.hasAuth"
+            label="Requires Authentication"
+            dense
+          />
+
+          <template v-if="form.hasAuth">
+            <q-input
+              v-model="form.username"
+              label="Username"
+              :rules="[(v) => !!v || 'Username is required']"
+              outlined
+              dense
+            />
+
+            <q-input
+              v-model="form.password"
+              :label="'Password'"
+              :type="showPassword ? 'text' : 'password'"
+              :rules="[(v) => !!v || 'Password is required']"
+              outlined
+              dense
+            >
+              <template v-slot:append>
+                <q-icon
+                  :name="showPassword ? 'visibility_off' : 'visibility'"
+                  class="cursor-pointer"
+                  @click="showPassword = !showPassword"
+                />
+              </template>
+            </q-input>
+          </template>
+
           <div v-if="error" class="text-negative text-caption">
             {{ error }}
           </div>
@@ -64,10 +97,14 @@ const emit = defineEmits<{
 const form = reactive({
   name: '',
   url: '',
+  hasAuth: false,
+  username: '',
+  password: '',
 });
 
 const loading = ref(false);
 const error = ref<string | null>(null);
+const showPassword = ref(false);
 
 function isValidUrl(url: string): boolean {
   try {
@@ -81,6 +118,10 @@ function isValidUrl(url: string): boolean {
 function resetForm() {
   form.name = '';
   form.url = '';
+  form.hasAuth = false;
+  form.username = '';
+  form.password = '';
+  showPassword.value = false;
   error.value = null;
 }
 
@@ -99,16 +140,24 @@ async function handleSubmit() {
     return;
   }
 
+  if (form.hasAuth && (!form.username || !form.password)) {
+    error.value = 'Username and password are required when authentication is enabled';
+    return;
+  }
+
   loading.value = true;
   error.value = null;
 
   try {
     // Test connection
-    const service = new RqliteService(form.url);
+    const service = new RqliteService(
+      form.url,
+      form.hasAuth ? { username: form.username, password: form.password } : undefined
+    );
     const isConnected = await service.testConnection();
 
     if (!isConnected) {
-      error.value = 'Could not connect to the database. Please check the URL.';
+      error.value = 'Could not connect to the database. Please check the URL and credentials.';
       return;
     }
 
@@ -117,6 +166,8 @@ async function handleSubmit() {
       id: crypto.randomUUID(),
       name: form.name,
       url: form.url,
+      ...(form.hasAuth && form.username && { username: form.username }),
+      ...(form.hasAuth && form.password && { password: form.password }),
       createdAt: Date.now(),
     };
 

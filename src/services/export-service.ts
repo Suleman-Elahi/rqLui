@@ -17,6 +17,8 @@ export interface ExportProgress {
 export interface ExportOptions {
   tableName: string;
   connectionUrl: string;
+  username?: string;
+  password?: string;
   format: 'csv' | 'sql';
   pageSize?: number;
   concurrency?: number;
@@ -31,6 +33,8 @@ export class ExportService {
     const {
       tableName,
       connectionUrl,
+      username,
+      password,
       format,
       pageSize = 5000,
       concurrency = 3,
@@ -38,7 +42,10 @@ export class ExportService {
     } = options;
 
     this.cancelled = false;
-    const rqlite = new RqliteService(connectionUrl);
+    const rqlite = new RqliteService(
+      connectionUrl,
+      username && password ? { username, password } : undefined
+    );
 
     // Get total count and schema
     const [totalRows, schema] = await Promise.all([
