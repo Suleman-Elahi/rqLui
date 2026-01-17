@@ -24,28 +24,46 @@ A modern, high-performance web UI for browsing and managing [RQLite](https://rql
 - **Delete Table** - Drop table entirely with confirmation dialog
 
 ### Large-Scale Data Import (1M+ rows supported)
+- **Web Worker-Based Processing** - All parsing runs in a separate thread to keep UI responsive
 - **Chunked CSV Import** - Stream-based file processing that handles massive CSV files without browser memory issues
   - Uses `ReadableStream` API to process files in chunks
   - Batches of 1,000 rows per RQLite request
   - Real-time progress dialog showing imported row count
   - Proper RFC 4180 CSV parsing (handles quoted fields, escaped quotes, commas in values)
+  - **Cancel support** - Abort long-running imports at any time
   
 - **SQL File Import** - Import `.sql` files containing INSERT statements
   - Stream-based parsing for large SQL dumps
   - Batches of 500 INSERT statements per request
   - Filters and executes only INSERT statements (ignores comments, DDL)
   - Progress tracking with statement count
+  - **Cancel support** - Abort long-running imports at any time
 
 ### Data Export (1M+ rows supported)
+- **Web Worker-Based Formatting** - CSV/SQL formatting runs in a separate thread
+- **Concurrent Data Fetching** - Fetches multiple pages simultaneously (3 concurrent requests)
 - **CSV Export** - Paginated export that fetches data in batches of 5,000 rows
   - Progress dialog showing export progress
   - Proper RFC 4180 CSV formatting with escaped quotes and newlines
+  - **Cancel support** - Abort long-running exports at any time
   
 - **SQL Export** - Export table as INSERT INTO statements
   - Paginated fetching for large tables
   - Proper SQL escaping (single quotes, NULL handling)
   - Includes header comments with table name and timestamp
   - Progress tracking with row count
+  - **Cancel support** - Abort long-running exports at any time
+
+- **DDL Export** - Export table structure only
+  - Downloads CREATE TABLE statement from sqlite_master
+  - Useful for recreating table schema in another database
+
+### SQL Console
+- **Read Consistency Levels** - Selectable consistency for queries:
+  - **None** - Fastest, reads local SQLite directly (may be stale)
+  - **Weak** - Default RQLite behavior, checks leadership
+  - **Linearizable** - Guaranteed fresh reads, contacts quorum
+  - **Strong** - Slowest, for testing scenarios
 
 ### Performance Optimizations
 - **RQLite API Best Practices** - Uses optimized endpoints and parameters:
@@ -102,15 +120,20 @@ The app uses RQLite's REST API with optimized parameters:
 | Feature | Endpoint | Parameters | Notes |
 |---------|----------|------------|-------|
 | Data Grid | `GET /db/query` | `associative`, `level=none` | Fastest reads, returns key-value rows |
-| SQL Console | `POST /db/request` | `associative`, `db_timeout=5s` | Auto-detects read vs write |
+| SQL Console | `POST /db/request` | `associative`, `db_timeout=5s`, `level` | Auto-detects read vs write, configurable consistency |
 | Cell Editing | `POST /db/execute` | `redirect`, parameterized JSON | Leader routing, SQL injection safe |
 | Bulk Import | `POST /db/execute` | `transaction`, `redirect` | Batched writes in single Raft entry |
 | Schema Info | `GET /db/query` | `PRAGMA table_info()` | Column metadata |
+| DDL Export | `GET /db/query` | `SELECT sql FROM sqlite_master` | Original CREATE TABLE statement |
 
 ### Why These Parameters Matter
 
 - **`associative`** - Returns rows as `{column: value}` objects instead of arrays, directly compatible with Quasar's q-table
-- **`level=none`** - Reads directly from local SQLite without Raft consensus check (fastest possible reads)
+- **`level`** - Read consistency level:
+  - `none` - Reads directly from local SQLite without any checks (fastest)
+  - `weak` - Checks if node is leader before reading (default RQLite behavior)
+  - `linearizable` - Contacts quorum to ensure leader status, waits for commit index
+  - `strong` - Sends read through Raft log (slowest, for testing)
 - **`redirect`** - Automatically redirects writes to cluster leader, returns 301 with leader address
 - **`transaction`** - Wraps batch operations in single Raft log entry for atomicity and performance
 - **`db_timeout`** - Prevents runaway queries from blocking the database
@@ -157,7 +180,7 @@ src/
 │   ├── DatabaseCard.vue      # Connection card on homepage
 │   ├── DataGrid.vue          # Paginated table with inline edit, import/export menus
 │   ├── QueryTab.vue          # Combines SqlBox + DataGrid + import/export logic
-│   ├── SqlBox.vue            # SQL input with execute button
+│   ├── SqlBox.vue            # SQL input with execute button and consistency selector
 │   └── TablePanel.vue        # Left sidebar with table list
 ├── pages/
 │   ├── DatabaseListPage.vue  # Homepage with connections
@@ -165,7 +188,12 @@ src/
 │   └── ErrorNotFound.vue     # 404 page
 ├── services/
 │   ├── rqlite-service.ts     # RQLite API client with all endpoints
-│   └── storage-service.ts    # localStorage persistence
+│   ├── storage-service.ts    # localStorage persistence
+│   ├── import-service.ts     # Web Worker-based import orchestration
+│   └── export-service.ts     # Web Worker-based export with concurrent fetching
+├── workers/
+│   ├── import-worker.ts      # Background thread for CSV/SQL parsing
+│   └── export-worker.ts      # Background thread for CSV/SQL formatting
 ├── stores/
 │   ├── connection-store.ts   # Pinia store for connections
 │   └── tab-store.ts          # Pinia store for tabs
@@ -183,6 +211,41 @@ src/
 ```
 
 ## Technical Details
+
+### Web Worker Architecture
+
+Import and export operations use Web Workers to keep the UI responsive during large file operations:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        MAIN THREAD                               │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐       │
+│  │  QueryTab    │───▶│ImportService │───▶│ RQLite API   │       │
+│  │  (UI)        │    │ExportService │    │ (HTTP)       │       │
+│  └──────────────┘    └──────┬───────┘    └──────────────┘       │
+│                             │                                    │
+└─────────────────────────────┼────────────────────────────────────┘
+                              │ postMessage
+┌─────────────────────────────┼────────────────────────────────────┐
+│                        WEB WORKER                                │
+│                      ┌──────▼───────┐                            │
+│                      │import-worker │  CSV/SQL Parsing           │
+│                      │export-worker │  CSV/SQL Formatting        │
+│                      └──────────────┘                            │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Import Flow:**
+1. User selects file → Main thread sends file to worker
+2. Worker streams file, parses CSV/SQL, sends batches back
+3. Main thread receives batches, sends to RQLite API
+4. Progress updates flow back to UI
+
+**Export Flow:**
+1. Main thread fetches data from RQLite (3 concurrent requests)
+2. Sends row batches to worker for formatting
+3. Worker formats CSV/SQL, sends chunks back
+4. Main thread assembles chunks into Blob for download
 
 ### Chunked Import Architecture
 
@@ -210,22 +273,27 @@ Custom RFC 4180-compliant parser handles:
 
 ### Paginated Export Architecture
 
-The export system fetches data in pages to handle large tables:
+The export system uses concurrent fetching and worker-based formatting:
 
 ```
-RQLite API → Page 1 (5000 rows) → Format → Accumulate
-           → Page 2 (5000 rows) → Format → Accumulate
-           → ...                          → Download File
+Main Thread                              Worker Thread
+     │                                        │
+     ├─── Fetch Page 1 ──────────────────────▶│
+     ├─── Fetch Page 2 ──────────────────────▶│ Format to CSV/SQL
+     ├─── Fetch Page 3 ──────────────────────▶│
+     │                                        │
+     │◀─────────────── Chunk 1 ───────────────┤
+     │◀─────────────── Chunk 2 ───────────────┤
+     │◀─────────────── Chunk 3 ───────────────┤
+     │                                        │
+     ▼                                        
+  Assemble Blob → Download
 ```
 
-1. **Paginated Fetching** - Uses `LIMIT/OFFSET` to fetch 5,000 rows per request
-2. **Progress Tracking** - Updates dialog with exported row count after each page
-3. **Memory Efficient** - Accumulates formatted strings, not raw objects
-4. **SQL Export** - Generates proper INSERT statements with:
-   - NULL handling for undefined values
-   - Single quote escaping (`'` → `''`)
-   - Numeric values without quotes
-   - Boolean to integer conversion (true → 1, false → 0)
+1. **Concurrent Fetching** - Fetches 3 pages simultaneously using `Promise.all`
+2. **Worker Formatting** - Sends rows to worker for CSV/SQL string generation
+3. **Chunk Assembly** - Collects formatted chunks into array
+4. **Blob Creation** - Creates downloadable Blob from chunks
 
 ## Requirements
 
