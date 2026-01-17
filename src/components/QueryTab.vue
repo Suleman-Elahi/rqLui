@@ -78,7 +78,7 @@ const pagination = ref<PaginationState>({
 });
 
 let rqliteService: RqliteService;
-let importService: ImportService | null = null; // eslint-disable-line @typescript-eslint/no-redundant-type-constituents
+let importService: ImportService | null = null;
 let exportService: ExportService | null = null;
 
 onMounted(async () => {
