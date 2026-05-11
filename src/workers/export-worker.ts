@@ -89,11 +89,13 @@ function formatCSVBatch(rows: Record<string, unknown>[]) {
 
     const csvRow = headers.map((h) => {
       const val = row[h];
-      if (val === null || val === undefined) return '';
+      if (val === null || val === undefined) return '';  // NULL -> empty (unquoted)
       if (typeof val === 'object') return `"${JSON.stringify(val).replace(/"/g, '""')}"`;
       const str = typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean'
         ? String(val)
         : JSON.stringify(val);
+      // Always quote empty strings so they round-trip as '' not NULL on re-import
+      if (str === '') return '""';
       return str.includes(',') || str.includes('"') || str.includes('\n')
         ? `"${str.replace(/"/g, '""')}"`
         : str;

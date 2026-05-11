@@ -251,6 +251,8 @@ export class RqliteService {
       align: 'left' as const,
       type: row.type as string,
       primaryKey: row.pk === 1,
+      notNull: row.notnull === 1,
+      defaultValue: row.dflt_value as string | null,
     }));
   }
 

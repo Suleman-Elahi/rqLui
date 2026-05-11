@@ -36,6 +36,15 @@
         @delete-table="handleDeleteTable"
       />
     </div>
+
+    <CsvColumnMapDialog
+      v-model="showColumnMapDialog"
+      :csv-headers="csvHeaders"
+      :table-columns="tableColumnNames"
+      :table-schema="tableSchemaForMapping"
+      :preview-rows="csvPreviewRows"
+      @confirm="handleColumnMapConfirm"
+    />
   </div>
 </template>
 
@@ -44,6 +53,7 @@ import { ref, onMounted, watch, onUnmounted } from 'vue';
 import { useQuasar } from 'quasar';
 import SqlBox, { type ConsistencyLevel } from './SqlBox.vue';
 import DataGrid from './DataGrid.vue';
+import CsvColumnMapDialog, { type ColumnMapping } from './CsvColumnMapDialog.vue';
 import { RqliteService } from '../services/rqlite-service';
 import { ImportService, type ImportProgress } from '../services/import-service';
 import { ExportService, type ExportProgress } from '../services/export-service';
@@ -55,6 +65,8 @@ const props = defineProps<{
   tableName: string;
   username?: string;
   password?: string;
+  importBatchSize?: number;
+  exportPageSize?: number;
 }>();
 
 const emit = defineEmits<{
@@ -80,6 +92,14 @@ const pagination = ref<PaginationState>({
 let rqliteService: RqliteService;
 let importService: ImportService | null = null;
 let exportService: ExportService | null = null;
+
+// CSV column mapping dialog state
+const showColumnMapDialog = ref(false);
+const csvHeaders = ref<string[]>([]);
+const csvPreviewRows = ref<string[][]>([]);
+const tableColumnNames = ref<string[]>([]);
+const tableSchemaForMapping = ref<ColumnDef[]>([]);
+let pendingImportFile: File | null = null;
 
 onMounted(async () => {
   rqliteService = new RqliteService(
@@ -257,6 +277,20 @@ function handlePaginationChange(newPagination: PaginationState) {
   void loadData();
 }
 
+// Re-run whatever is currently in the SQL box if it's a SELECT,
+// otherwise fall back to the default paginated load.
+async function refreshCurrentView() {
+  const trimmed = sql.value.trim();
+  const isSelect = /^\s*SELECT/i.test(trimmed);
+  const isDefaultQuery = trimmed === `SELECT * FROM "${props.tableName}"`;
+
+  if (isSelect && !isDefaultQuery) {
+    await executeQuery();
+  } else {
+    await loadData();
+  }
+}
+
 async function handleCellEdit(payload: CellEditPayload) {
   if (!primaryKey.value) {
     $q.notify({ type: 'negative', message: 'Cannot edit: no primary key' });
@@ -272,13 +306,13 @@ async function handleCellEdit(payload: CellEditPayload) {
 
     await rqliteService.execute(statement);
     $q.notify({ type: 'positive', message: 'Cell updated' });
-    await loadData(); // Reload to show updated value
+    await refreshCurrentView();
   } catch (err) {
     $q.notify({
       type: 'negative',
       message: err instanceof Error ? err.message : 'Update failed',
     });
-    await loadData(); // Revert by reloading
+    await refreshCurrentView();
   }
 }
 
@@ -428,7 +462,7 @@ async function runWorkerExport(format: 'csv' | 'sql') {
       connectionUrl: props.connectionUrl,
       ...(props.username && props.password && { username: props.username, password: props.password }),
       format,
-      pageSize: 5000,
+      pageSize: props.exportPageSize || 5000,
       concurrency: 3,
       onProgress,
     });
@@ -470,9 +504,37 @@ function handleImportCsv() {
   input.onchange = async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
-    await runWorkerImport(file, 'csv');
+
+    try {
+      // Parse preview for column mapping
+      const { headers, previewRows } = await ImportService.parseCSVPreview(file);
+      if (headers.length === 0) {
+        $q.notify({ type: 'negative', message: 'CSV file appears to be empty or invalid' });
+        return;
+      }
+
+      // Get table columns for mapping
+      const schema = await rqliteService.getTableSchema(props.tableName);
+      tableColumnNames.value = schema.map((col) => col.name);
+      tableSchemaForMapping.value = schema;
+      csvHeaders.value = headers;
+      csvPreviewRows.value = previewRows;
+      pendingImportFile = file;
+      showColumnMapDialog.value = true;
+    } catch (err) {
+      $q.notify({
+        type: 'negative',
+        message: err instanceof Error ? err.message : 'Failed to read CSV file',
+      });
+    }
   };
   input.click();
+}
+
+async function handleColumnMapConfirm(mapping: ColumnMapping) {
+  if (!pendingImportFile) return;
+  await runWorkerImport(pendingImportFile, 'csv', mapping);
+  pendingImportFile = null;
 }
 
 function handleImportSql() {
@@ -487,7 +549,7 @@ function handleImportSql() {
   input.click();
 }
 
-async function runWorkerImport(file: File, type: 'csv' | 'sql') {
+async function runWorkerImport(file: File, type: 'csv' | 'sql', columnMapping?: ColumnMapping) {
   importService = new ImportService();
   
   const formatBytes = (bytes: number) => {
@@ -535,7 +597,8 @@ async function runWorkerImport(file: File, type: 'csv' | 'sql') {
           tableName: props.tableName,
           connectionUrl: props.connectionUrl,
           ...(props.username && props.password && { username: props.username, password: props.password }),
-          batchSize: 1000,
+          batchSize: props.importBatchSize || 1000,
+          ...(columnMapping != null && { columnMapping }),
           onProgress,
         })
       : importService.importSQL({
@@ -543,7 +606,7 @@ async function runWorkerImport(file: File, type: 'csv' | 'sql') {
           tableName: props.tableName,
           connectionUrl: props.connectionUrl,
           ...(props.username && props.password && { username: props.username, password: props.password }),
-          batchSize: 500,
+          batchSize: props.importBatchSize || 500,
           onProgress,
         })
     );

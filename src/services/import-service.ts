@@ -23,12 +23,73 @@ export interface ImportOptions {
   username?: string;
   password?: string;
   batchSize?: number;
+  columnMapping?: Record<string, string>;
   onProgress?: (progress: ImportProgress) => void;
 }
 
 export class ImportService {
   private worker: Worker | null = null;
   private cancelled = false;
+
+  /**
+   * Parse only the header row and a few preview rows from a CSV file.
+   * Reads only the first chunk of the file for performance.
+   */
+  static async parseCSVPreview(
+    file: File,
+    maxRows = 3
+  ): Promise<{ headers: string[]; previewRows: string[][] }> {
+    const PREVIEW_BYTES = 8192; // Read at most 8KB for preview
+    const slice = file.slice(0, Math.min(file.size, PREVIEW_BYTES));
+    const text = await slice.text();
+    const lines = text.split('\n').filter((l) => l.trim());
+
+    if (lines.length === 0) {
+      return { headers: [], previewRows: [] };
+    }
+
+    const parseCSVLine = (line: string): string[] => {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const nextChar = line[i + 1];
+
+        if (inQuotes) {
+          if (char === '"' && nextChar === '"') {
+            current += '"';
+            i++;
+          } else if (char === '"') {
+            inQuotes = false;
+          } else {
+            current += char;
+          }
+        } else {
+          if (char === '"') {
+            inQuotes = true;
+          } else if (char === ',') {
+            result.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+      }
+      result.push(current.trim());
+      return result;
+    };
+
+    const headers = parseCSVLine(lines[0]!);
+    const previewRows: string[][] = [];
+
+    for (let i = 1; i < lines.length && previewRows.length < maxRows; i++) {
+      previewRows.push(parseCSVLine(lines[i]!));
+    }
+
+    return { headers, previewRows };
+  }
 
   async importCSV(options: ImportOptions): Promise<ImportProgress> {
     return this.runImport('parse-csv', options);
@@ -49,7 +110,7 @@ export class ImportService {
     type: 'parse-csv' | 'parse-sql',
     options: ImportOptions
   ): Promise<ImportProgress> {
-    const { file, tableName, connectionUrl, username, password, batchSize = 1000, onProgress } = options;
+    const { file, tableName, connectionUrl, username, password, batchSize = 1000, columnMapping, onProgress } = options;
     
     this.cancelled = false;
     const rqlite = new RqliteService(
@@ -57,14 +118,16 @@ export class ImportService {
       username && password ? { username, password } : undefined
     );
     
-    let headers: string[] = [];
+    let headers: (string | null)[] = [];
+    let mappedIndices: number[] = [];
+    let mappedTableColumns: string[] = [];
     let rowsParsed = 0;
     let rowsInserted = 0;
     let bytesProcessed = 0;
     const totalBytes = file.size;
 
     // Queue for batches waiting to be inserted
-    const batchQueue: string[][][] = [];
+    const batchQueue: (string | null)[][][] = [];
     let isInserting = false;
 
     const progress: ImportProgress = {
@@ -90,11 +153,18 @@ export class ImportService {
         const batch = batchQueue.shift()!;
         
         if (type === 'parse-csv') {
+          // Use mapped columns if mapping is provided, otherwise use all headers
+          const targetColumns = mappedTableColumns.length > 0 ? mappedTableColumns : headers;
+          const useMapping = mappedIndices.length > 0;
+
           const statements: ParameterizedStatement[] = batch.map(values => {
-            const placeholders = headers.map(() => '?').join(', ');
+            const rowValues = useMapping
+              ? mappedIndices.map(i => values[i])
+              : values;
+            const placeholders = targetColumns.map(() => '?').join(', ');
             return [
-              `INSERT INTO "${tableName}" (${headers.map(h => `"${h}"`).join(', ')}) VALUES (${placeholders})`,
-              ...values,
+              `INSERT INTO "${tableName}" (${targetColumns.map(h => `"${h}"`).join(', ')}) VALUES (${placeholders})`,
+              ...rowValues,
             ] as ParameterizedStatement;
           });
           await rqlite.executeBatch(statements);
@@ -129,6 +199,20 @@ export class ImportService {
         switch (msg.type) {
           case 'headers':
             headers = msg.headers || [];
+            // Build mapping indices if column mapping is provided
+            if (columnMapping && type === 'parse-csv') {
+              mappedIndices = [];
+              mappedTableColumns = [];
+              for (let i = 0; i < headers.length; i++) {
+                const header = headers[i];
+                if (header == null) continue;
+                const tableCol = columnMapping[header];
+                if (tableCol) {
+                  mappedIndices.push(i);
+                  mappedTableColumns.push(tableCol);
+                }
+              }
+            }
             break;
 
           case 'batch':

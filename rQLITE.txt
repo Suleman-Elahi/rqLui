@@ -1,0 +1,259 @@
+Accessing rqlite
+How to write data and read it back
+Each rqlite node exposes an HTTP API allowing data to be inserted into, and read back from, the database. Specifically there are three endpoints to know:
+
+/db/execute which expects write requests (INSERT, UPDATE, DELETE).
+/db/query which accepts only read requests (SELECT). Attempting to change the database via this endpoint will result in an error.
+/db/request which accepts both read and write requests. This endpoint is known as the Unified Endpoint.
+You can send your read and writes requests to any node in your cluster.
+
+Which endpoint should you use? If you know ahead of time whether you are doing reads or writes, you should choose the endpoint dedicated to that type of request (either /db/execute or /db/query), as you will know precisely what to expect when rqlite responds. This encourages the most robust interaction with rqlite.
+
+In contrast the format of the response from /db/request will depend on whether you send read or write requests, and will require your code to inspect the response more closely before parsing it. But /db/request can be more convenient in some cases, as you don’t need to worry about choosing a particular endpoint ahead of time – just send all your requests to /db/request.
+
+The best way to understand the API is to work through the simple examples below. There are also client libraries available.
+
+Writing Data
+To write data successfully to the database, you must create at least 1 table. To do this perform a HTTP POST on the /db/execute endpoint on any rqlite node. Encapsulate the CREATE TABLE SQL command in a JSON array, and put it in the body of the request. An example via curl:
+
+curl -XPOST 'localhost:4001/db/execute?pretty&timings' -H "Content-Type: application/json" -d '[
+    "CREATE TABLE foo (id INTEGER NOT NULL PRIMARY KEY, name TEXT, age INTEGER)"
+]'
+You can also perform a POST with the SQL command placed directly in the body:
+
+curl -XPOST 'localhost:4001/db/execute?pretty' -H "Content-Type: text/plain" -d \
+    'CREATE TABLE foo (id INTEGER NOT NULL PRIMARY KEY, name TEXT, age INTEGER)'
+The plain/text format can be convenient for quick prototyping via curl, but it is recommended you use the JSON request format for production code, as a more structured approach minimizes the chance of error.
+
+To insert an entry into the database, execute a second SQL command:
+
+curl -XPOST 'localhost:4001/db/execute?pretty&timings' -H "Content-Type: application/json" -d '[
+    "INSERT INTO foo(name, age) VALUES(\"fiona\", 20)"
+]'
+The response is of the form:
+
+{
+    "results": [
+        {
+            "last_insert_id": 1,
+            "rows_affected": 1,
+            "time": 0.00886
+        }
+    ],
+    "time": 0.0152
+}
+The use of the URL param pretty is optional, and results in pretty-printed JSON responses. Time is measured in seconds. If you do not want timings, do not pass timings as a URL parameter.
+
+Querying Data
+Querying data is easy. For a single query simply perform an HTTP GET on the /db/query endpoint, setting the query statement as the query parameter q:
+
+curl -G 'localhost:4001/db/query?pretty&timings' --data-urlencode 'q=SELECT * FROM foo'
+The default response is of the form:
+
+{
+    "results": [
+        {
+            "columns": [
+                "id",
+                "name",
+                "age"
+            ],
+            "types": [
+                "integer",
+                "text",
+                "integer"
+            ],
+            "values": [
+                [
+                    1,
+                    "fiona",
+                    20
+                ]
+            ],
+            "time": 0.0150043
+        }
+    ],
+    "time": 0.0220043
+}
+Note that types contains the declared type of the columns, not the Storage Class.
+
+You can also query via a HTTP POST request, with both JSON and Plain Text supported as the request body:
+
+curl -XPOST 'localhost:4001/db/query?pretty&timings' -H "Content-Type: application/json" -d '[
+    "SELECT * FROM foo"
+]'
+curl -XPOST 'localhost:4001/db/query?pretty&timings' -H "Content-Type: text/plain" -d 'SELECT * FROM foo'
+In both cases the response will be in the same form as when the query is made via HTTP GET.
+
+The plain/text format can be convenient for quick prototyping via curl, but it is recommended you use the JSON request format for production code.
+
+Associative response form
+You can also request an associative form of response, by adding associative as a query parameter:
+
+curl -G 'localhost:4001/db/query?pretty&timings&associative' --data-urlencode 'q=SELECT * FROM foo'
+Response:
+
+{
+    "results": [
+        {
+            "types": {"id": "integer", "age": "integer", "name": "text"},
+            "rows": [
+                { "id": 1, "age": 20, "name": "fiona"},
+                { "id": 2, "age": 25, "name": "declan"}
+            ],
+            "time": 0.000173061
+        }
+    ],
+    "time": 0.000185964
+}
+This form will have a map per row returned, with each column name as a key. This form can be more convenient for clients, as many programming languages will support loading the rows object directly into an array-of-maps data type.
+
+Parameterized Statements
+While the “raw” API described above can be convenient and simple to use, it is vulnerable to SQL Injection attacks. To protect against this issue, rqlite also supports SQLite parameterized statements, for both read and writes. To use this feature, send the SQL statement and values as distinct elements within a new JSON array, as follows:
+
+Writing data
+
+curl -XPOST 'localhost:4001/db/execute?pretty&timings' -H "Content-Type: application/json" -d '[
+    ["INSERT INTO foo(name, age) VALUES(?, ?)", "fiona", 20]
+]'
+Reading data
+
+curl -XPOST 'localhost:4001/db/query?pretty&timings' -H "Content-Type: application/json" -d '[
+    ["SELECT * FROM foo WHERE name=?", "fiona"]
+]'
+Named Parameters
+Named parameters are also supported. To use this feature set the values using a dictionary like so:
+
+Writing data
+
+curl -XPOST 'localhost:4001/db/execute?pretty&timings' -H "Content-Type: application/json" -d '[
+    ["INSERT INTO foo(name, age) VALUES(:name, :age)", {"name": "fiona", "age": 20}]
+]'
+Reading data
+
+curl -XPOST 'localhost:4001/db/query?pretty&timings' -H "Content-Type: application/json" -d '[
+    ["SELECT * FROM foo WHERE name=:name", {"name": "fiona"}]
+]'
+Example injection attack
+
+In practise, values such as fiona are dynamically set by clients, but Parameterized Statements protect against something like the following:
+
+curl -XPOST 'localhost:4001/db/query?pretty&timings' -H "Content-Type: application/json" -d '[
+    ["SELECT * FROM foo WHERE name=?", "fiona; DROP TABLE foo"]
+]'
+Transactions
+A form of transactions are supported. To execute statements within a transaction, add transaction to the URL. An example of the above operation executed within a transaction is shown below.
+
+curl -XPOST 'localhost:4001/db/execute?pretty&transaction' -H "Content-Type: application/json" -d "[
+    \"INSERT INTO foo(name) VALUES('fiona')\",
+    \"INSERT INTO foo(name) VALUES('sinead')\"
+]"
+When a transaction takes place either both statements will succeed, or neither. Performance is much, much better if multiple SQL INSERTs or UPDATEs are executed via a transaction. Note that processing of the request ceases the moment any single query results in an error.
+
+The behaviour of rqlite if you explicitly issue BEGIN, COMMIT, ROLLBACK, SAVEPOINT, and RELEASE to control your own transactions is not defined. This is because the behavior of a cluster if it fails while such a manually-controlled transaction is not yet defined. It is important to control transactions only through the query parameters shown above.
+
+Bulk Writes
+
+Bulk Writes allow you to write multiple records in a single request
+The Bulk API allows multiple updates or queries to be executed in a single request. Both non-parameterized and parameterized requests are supported by the Bulk API. However the API does not support mixing the parameterized and non-parameterized form in a single request.
+
+A bulk update is contained within a single Raft log entry, so round-trips between nodes are at a minimum. This should result in much better throughput, if it is possible to use this kind of update. You can also ask rqlite to do the batching for you automatically, through the use of Queued Writes. This relieves the client of doing any batching before transmitting a request to rqlite.
+
+If you have a large amount of pre-existing data, it may be much faster to instead restore a rqlite system with your data.
+
+Updates
+Bulk updates are supported. To execute multiple statements in one HTTP call, simply include the statements in the JSON array:
+
+Non-parameterized example:
+
+curl -XPOST 'localhost:4001/db/execute?pretty&timings' -H "Content-Type: application/json" -d "[
+    \"INSERT INTO foo(name) VALUES('fiona')\",
+    \"INSERT INTO foo(name) VALUES('sinead')\"
+]"
+Parameterized example:
+
+curl -XPOST 'localhost:4001/db/execute?pretty&timings' -H "Content-Type: application/json" -d '[
+    ["INSERT INTO foo(name) VALUES(?)", "fiona"],
+    ["INSERT INTO foo(name) VALUES(?)", "sinead"]
+]'
+The response is of the form:
+
+{
+    "results": [
+        {
+            "last_insert_id": 1,
+            "rows_affected": 1,
+            "time": 0.00759015
+        },
+        {
+            "last_insert_id": 2,
+            "rows_affected": 1,
+            "time": 0.00669015
+        }
+    ],
+    "time": 0.869015
+}
+Atomicity
+Because a bulk operation is contained within a single Raft log entry, and only one Raft log entry is ever processed at one time, a bulk operation will never be interleaved with other requests.
+
+Transaction support
+You may still wish to set the transaction flag when issuing a bulk update. This ensures that if any error occurs while processing the bulk update, all changes will be rolled back.
+
+Queries
+If you want to execute more than one query per HTTP request then perform a POST, and place the queries in the body of the request as a JSON array. For example:
+
+curl -XPOST 'localhost:4001/db/query?pretty' -H "Content-Type: application/json" -d '[
+
+
+Queued Writes
+Queued Writes allow you to trade durability for performance
+Normally rqlite waits until a write request has been safely committed to a majority of SQLite databases before returning a response to the client. Queued Writes is an option that allows write requests to complete much more quickly, but there are some trade offs (which are described later).
+
+Usage
+Queued Writes are enabled via a special API flag, which will instruct rqlite to queue up write-requests and execute them asynchronously. This allows clients to send multiple distinct requests to a rqlite node, and have rqlite automatically do the batching and bulk insert for the client, without the client doing any extra work. The net result is as if the client wrote a single Bulk request containing all the queued statements. For the same reason that using the Bulk API results in much higher write performance, using the Queued Writes API will also result in much higher write performance.
+
+This functionality is best illustrated by an example, showing two requests being queued.
+
+$ curl -XPOST 'localhost:4001/db/execute?queue' -H "Content-Type: application/json" -d '[
+    ["INSERT INTO foo(name) VALUES(?)", "fiona"],
+    ["INSERT INTO foo(name) VALUES(?)", "sinead"]
+]'
+{
+    "results": [],
+    "sequence_number": 1653314298877648934
+}
+$ curl -XPOST 'localhost:4001/db/execute?queue' -H "Content-Type: application/json" -d '[
+    ["INSERT INTO foo(name) VALUES(?)", "declan"]
+]'
+{
+    "results": [],
+    "sequence_number": 1653314298877649973
+}
+$
+Setting the URL query parameter queue enables queuing mode, adding the request data to an internal queue whch rqlite manages for you. Once the request has been queued, the response is returned to the client.
+
+rqlite will later merge queued requests, once a batch-size of them has been queued on the node (or a configurable timeout expires), and execute them as though they had been both contained in a single request.
+
+Each response includes a monotonically-increasing sequence_number, which allows you to track when this request is actually persisted to the Raft log. The /status diagnostics endpoint includes the sequence number of the latest request successfully written to Raft.
+
+Sequence numbers are local to the node that received the Queued Write request. Each node generates its own series of sequence numbers, and is not aware of other nodes’ sequence numbers.
+
+Waiting for a queue to flush
+You can explicitly tell the request to wait until the queue has persisted all pending requests. To do this, add the parameter wait to the request like so:
+
+$ curl -XPOST 'localhost:4001/db/execute?queue&wait&timeout=10s' -H "Content-Type: application/json" -d '[
+    ["INSERT INTO foo(name) VALUES(?)", "bob"]
+]'
+This example also shows setting a timeout. If the queue has not emptied after this time, the request will return with an error. If not set, the time out is set to 30 seconds.
+
+Configuring queue behaviour
+The behaviour of the queue rqlite uses to batch the requests is configurable at rqlite launch time. You can change the minimum number of requests that must be present in the queue before they are written, as well as the timeout after which whatever is in the queue will be written regardless of queue size. Pass -h to rqlited to see the queue defaults, and list all command-line options.
+
+Trade-offs
+Like most databases there is a trade-off to be made between write-performance and durability, but for some applications these trade-offs are worth it.
+
+Because the API returns immediately after queuing the requests but before the data is commited to the Raft log there is a small risk of data loss in the event the node crashes before queued data is persisted. You can make this window arbitrarily small by adjusting the queuing parameters, at the cost of write performance.
+
+In addition, when the API returns HTTP 200 OK, that simply acknowledges that the data has been queued correctly. It does not indicate that the SQL statements will actually be applied successfully to the database. Be sure to check the node’s logs and diagnostics if you have any concerns about failed queued writes.
+
+By default, writes from the queue are not performed within a transaction. If you wish to change this, it must be set at launch time via the command line option -write-queue-tx.

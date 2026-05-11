@@ -15,6 +15,7 @@
         @select="handleTableSelect"
         @create="showCreateDialog = true"
         @refresh="loadTables"
+        @alter="handleAlterTable"
       />
       
       <!-- Resize handle -->
@@ -86,7 +87,11 @@
                 v-if="connection"
                 :connection-url="connection.url"
                 :table-name="tab.tableName"
-                v-bind="connection.username && connection.password ? { username: connection.username, password: connection.password } : {}"
+                v-bind="{
+                  ...(connection.username && connection.password ? { username: connection.username, password: connection.password } : {}),
+                  ...(connection.importBatchSize != null ? { importBatchSize: connection.importBatchSize } : {}),
+                  ...(connection.exportPageSize != null ? { exportPageSize: connection.exportPageSize } : {}),
+                }"
                 @table-deleted="handleTableDeleted(tab.id)"
               />
             </q-tab-panel>
@@ -107,6 +112,15 @@
       @created="handleCreateTable"
       ref="createDialogRef"
     />
+
+    <AlterTableDialog
+      v-if="connection"
+      v-model="showAlterDialog"
+      :table-name="alterTableTarget"
+      :connection-url="connection.url"
+      v-bind="connection.username && connection.password ? { username: connection.username, password: connection.password } : {}"
+      @altered="handleTableAltered"
+    />
   </q-layout>
 </template>
 
@@ -120,6 +134,7 @@ import { RqliteService } from '../services/rqlite-service';
 import TablePanel from '../components/TablePanel.vue';
 import QueryTab from '../components/QueryTab.vue';
 import CreateTableDialog from '../components/CreateTableDialog.vue';
+import AlterTableDialog from '../components/AlterTableDialog.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -136,6 +151,8 @@ const tables = ref<string[]>([]);
 const drawerOpen = ref(true);
 const showCreateDialog = ref(false);
 const createDialogRef = ref<InstanceType<typeof CreateTableDialog> | null>(null);
+const showAlterDialog = ref(false);
+const alterTableTarget = ref('');
 const drawerWidth = ref(220);
 const isResizingDrawer = ref(false);
 
@@ -229,6 +246,23 @@ async function handleCreateTable() {
 async function handleTableDeleted(tabId: string) {
   tabStore.closeTab(connectionId.value, tabId);
   await loadTables();
+}
+
+function handleAlterTable(tableName: string) {
+  alterTableTarget.value = tableName;
+  showAlterDialog.value = true;
+}
+
+async function handleTableAltered(newTableName: string) {
+  await loadTables();
+  // If the altered table has an open tab, update it
+  const tabs = tabStore.getTabs(connectionId.value);
+  const tab = tabs.find(t => t.tableName === alterTableTarget.value);
+  if (tab) {
+    tabStore.closeTab(connectionId.value, tab.id);
+    tabStore.openTab(connectionId.value, newTableName);
+  }
+  $q.notify({ type: 'positive', message: 'Table altered successfully' });
 }
 
 function startDrawerResize(e: MouseEvent) {

@@ -61,6 +61,29 @@
             </q-input>
           </template>
 
+          <q-separator class="q-my-sm" />
+          <div class="text-caption text-grey-7">Batch Settings (optional)</div>
+
+          <q-input
+            v-model.number="form.importBatchSize"
+            label="Import Batch Size"
+            hint="Rows per batch during import (default: 1000)"
+            type="number"
+            outlined
+            dense
+            :rules="[(v) => !v || v > 0 || 'Must be a positive number']"
+          />
+
+          <q-input
+            v-model.number="form.exportPageSize"
+            label="Export Page Size"
+            hint="Rows per page during export (default: 5000)"
+            type="number"
+            outlined
+            dense
+            :rules="[(v) => !v || v > 0 || 'Must be a positive number']"
+          />
+
           <div v-if="error" class="text-negative text-caption">
             {{ error }}
           </div>
@@ -100,6 +123,8 @@ const form = reactive({
   hasAuth: false,
   username: '',
   password: '',
+  importBatchSize: null as number | null,
+  exportPageSize: null as number | null,
 });
 
 const loading = ref(false);
@@ -121,6 +146,8 @@ function resetForm() {
   form.hasAuth = false;
   form.username = '';
   form.password = '';
+  form.importBatchSize = null;
+  form.exportPageSize = null;
   showPassword.value = false;
   error.value = null;
 }
@@ -168,6 +195,8 @@ async function handleSubmit() {
       url: form.url,
       ...(form.hasAuth && form.username && { username: form.username }),
       ...(form.hasAuth && form.password && { password: form.password }),
+      ...(form.importBatchSize && { importBatchSize: form.importBatchSize }),
+      ...(form.exportPageSize && { exportPageSize: form.exportPageSize }),
       createdAt: Date.now(),
     };
 

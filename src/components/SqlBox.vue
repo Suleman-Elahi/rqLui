@@ -1,6 +1,6 @@
 <template>
   <div class="sql-box q-pa-sm">
-    <div class="row items-start q-gutter-sm">
+    <div class="row items-start q-gutter-sm no-wrap" style="max-width: 900px;">
       <q-input
         :model-value="modelValue"
         @update:model-value="$emit('update:modelValue', String($event ?? ''))"

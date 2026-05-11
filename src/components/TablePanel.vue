@@ -27,6 +27,17 @@
         <q-item-section>
           <q-item-label class="table-name">{{ table }}</q-item-label>
         </q-item-section>
+        <q-item-section side>
+          <q-btn
+            flat round dense size="xs"
+            icon="settings"
+            color="grey-6"
+            class="alter-btn"
+            @click.stop="$emit('alter', table)"
+          >
+            <q-tooltip>Alter table structure</q-tooltip>
+          </q-btn>
+        </q-item-section>
       </q-item>
     </q-list>
 
@@ -46,6 +57,7 @@ defineEmits<{
   (e: 'select', tableName: string): void;
   (e: 'create'): void;
   (e: 'refresh'): void;
+  (e: 'alter', tableName: string): void;
 }>();
 </script>
 
@@ -73,5 +85,12 @@ defineEmits<{
 
 .table-name {
   font-weight: 600;
+}
+.alter-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.table-item:hover .alter-btn {
+  opacity: 1;
 }
 </style>

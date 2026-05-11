@@ -12,8 +12,8 @@ export interface ImportWorkerMessage {
 
 export interface ImportWorkerResponse {
   type: 'batch' | 'progress' | 'complete' | 'error' | 'headers';
-  batch?: string[][];  // Array of rows, each row is array of values
-  headers?: string[];
+  batch?: (string | null)[][];  // Array of rows, each row is array of values (null = SQL NULL)
+  headers?: (string | null)[];
   totalRows?: number;
   bytesProcessed?: number;
   totalBytes?: number;
@@ -59,13 +59,48 @@ async function parseCSV(file: File, batchSize: number) {
   const reader = file.stream().getReader();
   const decoder = new TextDecoder();
   
-  let lineBuffer = '';
+  let buffer = '';
   let isFirstLine = true;
-  let headers: string[] = [];
-  let currentBatch: string[][] = [];
+  let headers: (string | null)[] = [];
+  let currentBatch: (string | null)[][] = [];
   let totalRows = 0;
   let bytesProcessed = 0;
   const totalBytes = file.size;
+
+  // Extract complete CSV rows respecting quoted fields (which may contain newlines)
+  const extractRows = (flush = false): string[] => {
+    const rows: string[] = [];
+    let inQuotes = false;
+    let rowStart = 0;
+
+    for (let i = 0; i < buffer.length; i++) {
+      const char = buffer[i];
+      if (char === '"') {
+        // Toggle quote state, handling escaped quotes ""
+        if (inQuotes && buffer[i + 1] === '"') {
+          i++; // skip escaped quote
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === '\n' && !inQuotes) {
+        rows.push(buffer.slice(rowStart, i));
+        rowStart = i + 1;
+      }
+    }
+
+    if (flush) {
+      // On flush, take whatever remains
+      if (rowStart < buffer.length) {
+        rows.push(buffer.slice(rowStart));
+      }
+      buffer = '';
+    } else {
+      // Keep the incomplete last row in the buffer
+      buffer = buffer.slice(rowStart);
+    }
+
+    return rows;
+  };
 
   while (!cancelled) {
     const { done, value } = await reader.read();
@@ -73,15 +108,14 @@ async function parseCSV(file: File, batchSize: number) {
     if (done) break;
 
     bytesProcessed += value.byteLength;
-    lineBuffer += decoder.decode(value, { stream: true });
+    buffer += decoder.decode(value, { stream: true });
     
-    const lines = lineBuffer.split('\n');
-    lineBuffer = lines.pop() || '';
+    const rows = extractRows();
 
-    for (const line of lines) {
+    for (const row of rows) {
       if (cancelled) break;
       
-      const trimmed = line.trim();
+      const trimmed = row.trim();
       if (!trimmed) continue;
 
       if (isFirstLine) {
@@ -116,9 +150,19 @@ async function parseCSV(file: File, batchSize: number) {
     });
   }
 
-  // Process remaining buffer
-  if (!cancelled && lineBuffer.trim()) {
-    const values = parseCSVLine(lineBuffer.trim());
+  // Flush remaining buffer
+  const remaining = extractRows(true);
+  for (const row of remaining) {
+    if (cancelled) break;
+    const trimmed = row.trim();
+    if (!trimmed) continue;
+    if (isFirstLine) {
+      headers = parseCSVLine(trimmed);
+      postResponse({ type: 'headers', headers });
+      isFirstLine = false;
+      continue;
+    }
+    const values = parseCSVLine(trimmed);
     currentBatch.push(values);
     totalRows++;
   }
@@ -139,10 +183,11 @@ async function parseCSV(file: File, batchSize: number) {
   }
 }
 
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
+function parseCSVLine(line: string): (string | null)[] {
+  const result: (string | null)[] = [];
   let current = '';
   let inQuotes = false;
+  let wasQuoted = false;
   
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
@@ -160,15 +205,18 @@ function parseCSVLine(line: string): string[] {
     } else {
       if (char === '"') {
         inQuotes = true;
+        wasQuoted = true;
       } else if (char === ',') {
-        result.push(current.trim());
+        // Unquoted empty field = NULL; quoted empty field = empty string
+        result.push(!wasQuoted && current === '' ? null : current);
         current = '';
+        wasQuoted = false;
       } else {
         current += char;
       }
     }
   }
-  result.push(current.trim());
+  result.push(!wasQuoted && current === '' ? null : current);
   return result;
 }
 

@@ -4,6 +4,8 @@ export interface DatabaseConnection {
   url: string;
   username?: string;
   password?: string;
+  importBatchSize?: number;
+  exportPageSize?: number;
   createdAt: number;
 }
 
@@ -15,6 +17,8 @@ export interface ColumnDef {
   align: 'left' | 'center' | 'right';
   type?: string;
   primaryKey?: boolean;
+  notNull?: boolean;
+  defaultValue?: string | null;
 }
 
 export interface PaginationState {
