@@ -180,6 +180,7 @@ const execError = ref<string | null>(null);
 const newTableName = ref('');
 const editedColumns = ref<EditedColumn[]>([]);
 let nextId = 0;
+let rqliteService: RqliteService | null = null;
 
 // ── Load schema when dialog opens ──────────────────────────────────────────
 
@@ -194,8 +195,10 @@ async function loadSchema() {
   schemaLoading.value = true;
   loadError.value = null;
   try {
-    const svc = makeService();
-    const schema = await svc.getTableSchema(props.tableName);
+    if (!rqliteService) {
+      rqliteService = makeService();
+    }
+    const schema = await rqliteService.getTableSchema(props.tableName);
     newTableName.value = props.tableName;
     editedColumns.value = schema.map(col => ({
       _id: nextId++,
@@ -292,11 +295,14 @@ async function applyChanges() {
   loading.value = true;
 
   try {
-    const svc = makeService();
+    if (!rqliteService) {
+      rqliteService = makeService();
+    }
     // Execute each statement individually — ALTER TABLE can't be batched in a transaction
     for (const stmt of pendingStatements.value) {
-      await svc.execute([stmt]);
+      await rqliteService.execute([stmt]);
     }
+    rqliteService.invalidateSchemaCache(props.tableName);
     const finalName = newTableName.value !== props.tableName
       ? newTableName.value
       : props.tableName;

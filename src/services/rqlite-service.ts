@@ -12,6 +12,8 @@ import {
 
 export class RqliteService {
   private client: AxiosInstance;
+  private schemaCache = new Map<string, { data: ColumnDef[]; ts: number }>();
+  private static SCHEMA_TTL_MS = 30_000;
 
   constructor(baseUrl: string, auth?: { username: string; password: string }) {
     this.client = axios.create({
@@ -25,6 +27,14 @@ export class RqliteService {
         },
       }),
     });
+  }
+
+  invalidateSchemaCache(table?: string): void {
+    if (table) {
+      this.schemaCache.delete(table);
+    } else {
+      this.schemaCache.clear();
+    }
   }
 
   /**
@@ -233,17 +243,22 @@ export class RqliteService {
    */
   async getTables(): Promise<string[]> {
     const result = await this.query(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name LIMIT 10000"
     );
     return (result.rows || []).map((row) => row.name as string);
   }
 
   /**
-   * Get table schema using PRAGMA table_info
+   * Get table schema using PRAGMA table_info (with TTL cache)
    */
   async getTableSchema(table: string): Promise<ColumnDef[]> {
+    const cached = this.schemaCache.get(table);
+    if (cached && Date.now() - cached.ts < RqliteService.SCHEMA_TTL_MS) {
+      return cached.data;
+    }
+
     const result = await this.query(`PRAGMA table_info("${table}")`);
-    return (result.rows || []).map((row) => ({
+    const schema = (result.rows || []).map((row) => ({
       name: row.name as string,
       label: row.name as string,
       field: row.name as string,
@@ -254,13 +269,15 @@ export class RqliteService {
       notNull: row.notnull === 1,
       defaultValue: row.dflt_value as string | null,
     }));
+
+    this.schemaCache.set(table, { data: schema, ts: Date.now() });
+    return schema;
   }
 
   /**
-   * Get primary key column for a table
+   * Get primary key column for a table (derived from schema, no extra API call)
    */
-  async getTablePrimaryKey(table: string): Promise<string | null> {
-    const schema = await this.getTableSchema(table);
+  getTablePrimaryKeyFromSchema(schema: ColumnDef[]): string | null {
     const pkColumn = schema.find((col) => col.primaryKey);
     return pkColumn?.name || null;
   }
@@ -320,13 +337,27 @@ export class RqliteService {
 
   /**
    * Query with pagination using LIMIT/OFFSET (with timing)
+   * @param knownTotal - if provided, skips the COUNT(*) query
    */
   async queryWithPagination(
     table: string,
     page: number,
-    pageSize: number
+    pageSize: number,
+    knownTotal?: number
   ): Promise<{ result: RqliteAssociativeResult; total: number; time?: number }> {
     const offset = (page - 1) * pageSize;
+
+    if (knownTotal !== undefined) {
+      const queryResult = await this.queryWithTime(
+        `SELECT * FROM "${table}" LIMIT ${pageSize} OFFSET ${offset}`
+      );
+      return {
+        result: queryResult.result,
+        total: knownTotal,
+        ...(queryResult.time !== undefined && { time: queryResult.time }),
+      };
+    }
+
     const [queryResult, total] = await Promise.all([
       this.queryWithTime(`SELECT * FROM "${table}" LIMIT ${pageSize} OFFSET ${offset}`),
       this.getTableCount(table),

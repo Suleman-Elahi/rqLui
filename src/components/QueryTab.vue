@@ -108,8 +108,7 @@ onMounted(async () => {
       ? { username: props.username, password: props.password }
       : undefined
   );
-  await loadTableSchema();
-  await loadData();
+  await Promise.all([loadTableSchema(), loadData()]);
 });
 
 onUnmounted(() => {
@@ -122,16 +121,19 @@ onUnmounted(() => {
   }
 });
 
+let tableNameVersion = 0;
 watch(() => props.tableName, async () => {
   sql.value = `SELECT * FROM "${props.tableName}"`;
-  await loadTableSchema();
-  await loadData();
+  const version = ++tableNameVersion;
+  await Promise.all([loadTableSchema(), loadData()]);
+  // If another table change fired while we were loading, discard stale result
+  if (version !== tableNameVersion) return;
 });
 
 async function loadTableSchema() {
   try {
     columns.value = await rqliteService.getTableSchema(props.tableName);
-    primaryKey.value = await rqliteService.getTablePrimaryKey(props.tableName);
+    primaryKey.value = rqliteService.getTablePrimaryKeyFromSchema(columns.value);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to load schema';
   }
@@ -151,10 +153,10 @@ async function loadData() {
 
     queryTime.value = time ?? null;
 
-    rows.value = (result.rows || []).map((row, index) => ({
-      ...row,
-      __rowIndex: index,
-    }));
+    rows.value = (result.rows || []).map((row, index) => {
+      row.__rowIndex = index;
+      return row;
+    });
     
     // IMPORTANT: Use columns from API response to preserve order
     if (result.columns && result.columns.length > 0) {
@@ -222,10 +224,10 @@ async function executeQuery() {
 
     if ('rows' in result && result.rows) {
       // SELECT query
-      rows.value = result.rows.map((row, index) => ({
-        ...row,
-        __rowIndex: index,
-      }));
+      rows.value = result.rows.map((row, index) => {
+        row.__rowIndex = index;
+        return row;
+      });
       
       // IMPORTANT: Use columns from API response to preserve order
       if (result.columns && result.columns.length > 0) {

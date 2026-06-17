@@ -24,7 +24,7 @@
           />
 
           <div class="text-subtitle2 q-mb-sm">Columns</div>
-          <div v-for="(col, index) in columns" :key="index" class="row q-gutter-sm q-mb-sm items-center">
+          <div v-for="(col, index) in columns" :key="col._id" class="row q-gutter-sm q-mb-sm items-center">
             <q-input v-model="col.name" label="Name" outlined dense class="col" />
             <q-select
               v-model="col.type"
@@ -106,14 +106,16 @@ const error = ref<string | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 interface ColumnDef {
+  _id: number;
   name: string;
   type: string;
   primaryKey: boolean;
   notNull: boolean;
 }
 
+let nextColId = 0;
 const columns = ref<ColumnDef[]>([
-  { name: 'id', type: 'INTEGER', primaryKey: true, notNull: true },
+  { _id: nextColId++, name: 'id', type: 'INTEGER', primaryKey: true, notNull: true },
 ]);
 
 const columnTypes = ['INTEGER', 'TEXT', 'REAL', 'BLOB', 'NUMERIC'];
@@ -135,7 +137,7 @@ const generatedSql = computed(() => {
 });
 
 function addColumn() {
-  columns.value.push({ name: '', type: 'TEXT', primaryKey: false, notNull: false });
+  columns.value.push({ _id: nextColId++, name: '', type: 'TEXT', primaryKey: false, notNull: false });
 }
 
 function removeColumn(index: number) {
@@ -145,7 +147,7 @@ function removeColumn(index: number) {
 function resetForm() {
   tableName.value = '';
   rawSql.value = '';
-  columns.value = [{ name: 'id', type: 'INTEGER', primaryKey: true, notNull: true }];
+  columns.value = [{ _id: nextColId++, name: 'id', type: 'INTEGER', primaryKey: true, notNull: true }];
   activeTab.value = 'builder';
   error.value = null;
 }

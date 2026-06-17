@@ -135,7 +135,7 @@
           
           <!-- Regular data cell -->
           <template v-else-if="col.name !== '__actions'">
-            <span class="cell-content">{{ formatValue(col.value) }}</span>
+            <span class="cell-content">{{ formattedValues[col.field] }}</span>
             <q-popup-edit
               v-if="primaryKey"
               :model-value="props.row[col.field]"
@@ -143,7 +143,7 @@
               buttons
               label-set="Set"
               label-cancel="Cancel"
-              @save="(val: unknown, initialVal: unknown) => handleCellEdit(props.row, col.field, initialVal, val)"
+              @save="onCellSave(props.row, col.field)"
               v-slot="scope"
             >
               <q-input 
@@ -252,7 +252,7 @@ watch(() => props.pagination, (newPagination) => {
     rowsPerPage: newPagination.rowsPerPage,
     rowsNumber: newPagination.rowsNumber,
   };
-}, { immediate: true, deep: true });
+}, { immediate: true });
 
 const allRows = computed(() => {
   if (isAddingRow.value) {
@@ -264,6 +264,22 @@ const allRows = computed(() => {
   }
   return props.rows;
 });
+
+const formattedValues = computed(() => {
+  const map: Record<string, string> = {};
+  for (const row of props.rows) {
+    for (const col of props.columns) {
+      map[col.field] = formatValue(row[col.field]);
+    }
+  }
+  return map;
+});
+
+function onCellSave(row: Record<string, unknown>, column: string) {
+  return (val: unknown, initialVal: unknown) => {
+    handleCellEdit(row, column, initialVal, val);
+  };
+}
 
 function startAddRow() {
   for (const col of props.columns) {

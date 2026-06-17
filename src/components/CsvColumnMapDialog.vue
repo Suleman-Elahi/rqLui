@@ -42,7 +42,7 @@
               <q-select
                 :model-value="columnMap[cellProps.row.csvColumn]"
                 @update:model-value="updateMapping(cellProps.row.csvColumn, $event)"
-                :options="availableTableColumns(cellProps.row.csvColumn)"
+                :options="availableColumnsMap[cellProps.row.csvColumn]"
                 dense
                 outlined
                 clearable
@@ -218,14 +218,19 @@ watch(
   }
 );
 
-function availableTableColumns(currentCsvColumn: string): string[] {
-  const usedByOthers = new Set(
-    Object.entries(columnMap.value)
-      .filter(([key, val]) => key !== currentCsvColumn && val != null)
-      .map(([, val]) => val as string)
-  );
-  return props.tableColumns.filter((col) => !usedByOthers.has(col));
-}
+/** Pre-computed available options per CSV column — avoids O(n²) in template */
+const availableColumnsMap = computed(() => {
+  const map: Record<string, string[]> = {};
+  for (const csvCol of props.csvHeaders) {
+    const usedByOthers = new Set(
+      Object.entries(columnMap.value)
+        .filter(([key, val]) => key !== csvCol && val != null)
+        .map(([, val]) => val as string)
+    );
+    map[csvCol] = props.tableColumns.filter((col) => !usedByOthers.has(col));
+  }
+  return map;
+});
 
 function updateMapping(csvColumn: string, tableColumn: string | null) {
   columnMap.value = { ...columnMap.value, [csvColumn]: tableColumn };

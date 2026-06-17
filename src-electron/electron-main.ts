@@ -20,8 +20,12 @@ async function createWindow() {
     height: 600,
     useContentSize: true,
     webPreferences: {
+      nodeIntegration: false,
       contextIsolation: true,
-      // More info: https://v2.quasar.dev/quasar-cli-vite/developing-electron-apps/electron-preload-script
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      experimentalFeatures: false,
       preload: path.resolve(
         currentDir,
         path.join(process.env.QUASAR_ELECTRON_PRELOAD_FOLDER, 'electron-preload' + process.env.QUASAR_ELECTRON_PRELOAD_EXTENSION)
@@ -45,10 +49,22 @@ async function createWindow() {
     });
   }
 
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('Renderer process gone:', details.reason, details.exitCode);
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = undefined;
   });
 }
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+});
 
 void app.whenReady().then(createWindow);
 

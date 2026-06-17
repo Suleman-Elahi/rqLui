@@ -182,10 +182,10 @@ export class ExportService {
         currentPage++;
       }
 
-      // Fetch pages concurrently
+      // Fetch pages concurrently (skip COUNT per page since totalRows is known)
       const results = await Promise.all(
         pagesToFetch.map((page) =>
-          rqlite.queryWithPagination(tableName, page, pageSize)
+          rqlite.queryWithPagination(tableName, page, pageSize, totalRows)
         )
       );
 

@@ -87,11 +87,7 @@
                 v-if="connection"
                 :connection-url="connection.url"
                 :table-name="tab.tableName"
-                v-bind="{
-                  ...(connection.username && connection.password ? { username: connection.username, password: connection.password } : {}),
-                  ...(connection.importBatchSize != null ? { importBatchSize: connection.importBatchSize } : {}),
-                  ...(connection.exportPageSize != null ? { exportPageSize: connection.exportPageSize } : {}),
-                }"
+                v-bind="queryTabProps"
                 @table-deleted="handleTableDeleted(tab.id)"
               />
             </q-tab-panel>
@@ -165,6 +161,22 @@ const activeTabId = computed({
 const activeTable = computed(() => {
   const activeTab = tabStore.getActiveTab(connectionId.value);
   return activeTab?.tableName || null;
+});
+
+const queryTabProps = computed(() => {
+  if (!connection.value) return {};
+  const props: Record<string, unknown> = {};
+  if (connection.value.username && connection.value.password) {
+    props.username = connection.value.username;
+    props.password = connection.value.password;
+  }
+  if (connection.value.importBatchSize != null) {
+    props.importBatchSize = connection.value.importBatchSize;
+  }
+  if (connection.value.exportPageSize != null) {
+    props.exportPageSize = connection.value.exportPageSize;
+  }
+  return props;
 });
 
 let rqliteService: RqliteService | null = null;

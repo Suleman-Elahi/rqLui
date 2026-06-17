@@ -38,10 +38,11 @@ export const useTabStore = defineStore('tabs', () => {
 
   // Actions
   function openTab(connectionId: string, tableName: string): string {
+    const tabs = getTabs(connectionId);
+
     // Check if tab already exists for this table
-    const existingTab = getTabForTable(connectionId, tableName);
+    const existingTab = tabs.find((t) => t.tableName === tableName && !t.isCustomQuery);
     if (existingTab) {
-      // Switch to existing tab
       activeTabByConnection.value.set(connectionId, existingTab.id);
       return existingTab.id;
     }
@@ -54,7 +55,6 @@ export const useTabStore = defineStore('tabs', () => {
       isCustomQuery: false,
     };
 
-    const tabs = getTabs(connectionId);
     tabs.push(newTab);
     tabsByConnection.value.set(connectionId, tabs);
     activeTabByConnection.value.set(connectionId, newTab.id);
@@ -87,10 +87,7 @@ export const useTabStore = defineStore('tabs', () => {
   }
 
   function setActiveTab(connectionId: string, tabId: string): void {
-    const tabs = getTabs(connectionId);
-    if (tabs.some((t) => t.id === tabId)) {
-      activeTabByConnection.value.set(connectionId, tabId);
-    }
+    activeTabByConnection.value.set(connectionId, tabId);
   }
 
   function updateTabSql(connectionId: string, tabId: string, sql: string): void {

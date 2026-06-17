@@ -22,27 +22,6 @@ export class StorageService {
     }
   }
 
-  static addConnection(connection: DatabaseConnection): void {
-    const connections = this.loadConnections();
-    connections.push(connection);
-    this.saveConnections(connections);
-  }
-
-  static removeConnection(id: string): void {
-    const connections = this.loadConnections();
-    const filtered = connections.filter((c) => c.id !== id);
-    this.saveConnections(filtered);
-  }
-
-  static updateConnection(connection: DatabaseConnection): void {
-    const connections = this.loadConnections();
-    const index = connections.findIndex((c) => c.id === connection.id);
-    if (index !== -1) {
-      connections[index] = connection;
-      this.saveConnections(connections);
-    }
-  }
-
   static getConnection(id: string): DatabaseConnection | undefined {
     const connections = this.loadConnections();
     return connections.find((c) => c.id === id);
